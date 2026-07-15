@@ -1,0 +1,26 @@
+[package]
+name = "lluma-desktop"
+version = "0.0.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[lib]
+name = "lluma_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lluma-core = { path = "../../../crates/lluma-core" }
+lluma-runtime = { path = "../../../crates/lluma-runtime" }
+lluma-registry = { path = "../../../crates/lluma-registry" }
+
+[lints.rust]
+linker_messages = "allow"
+
+# Standalone: not part of the root workspace.
+[workspace]
