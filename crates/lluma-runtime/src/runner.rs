@@ -88,10 +88,9 @@ impl ModelRunner for LlamaRunner {
         ]);
 
         let mut out = String::new();
-        let mut n_cur = tokens.len() as i32;
         let mut decoder = encoding_rs::UTF_8.new_decoder();
 
-        for _ in 0..req.max_tokens {
+        for n_cur in (tokens.len() as i32..).take(req.max_tokens) {
             let next = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(next);
             if next == self.model.token_eos() {
@@ -111,7 +110,6 @@ impl ModelRunner for LlamaRunner {
             batch
                 .add(next, n_cur, &[0], true)
                 .map_err(|e| LlumaError::Backend(format!("batch add: {e}")))?;
-            n_cur += 1;
             ctx.decode(&mut batch)
                 .map_err(|e| LlumaError::Backend(format!("decode: {e}")))?;
         }

@@ -1,3 +1,4 @@
+#![allow(linker_messages)] // Silence benign upstream llama.cpp CRT linker warning (LNK4098)
 //! Runs only when LLUMA_TEST_GGUF points to a real small GGUF file.
 //! Example (PowerShell): $env:LLUMA_TEST_GGUF="C:\models\qwen0.5b.gguf"; cargo test -p lluma-runtime --test llama_integration -- --nocapture
 use lluma_runtime::{GenerateRequest, LlamaRunner, ModelRunner};
