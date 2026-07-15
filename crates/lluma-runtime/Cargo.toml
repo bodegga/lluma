@@ -9,6 +9,8 @@ lluma-core = { path = "../lluma-core" }
 serde = { workspace = true }
 thiserror = { workspace = true }
 sysinfo = { workspace = true }
+llama-cpp-2 = "0.1"
+encoding_rs = "0.8"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 nvml-wrapper = "0.10"
