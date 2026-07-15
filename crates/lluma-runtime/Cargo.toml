@@ -1,0 +1,14 @@
+[package]
+name = "lluma-runtime"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lluma-core = { path = "../lluma-core" }
+serde = { workspace = true }
+thiserror = { workspace = true }
+sysinfo = { workspace = true }
+
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+nvml-wrapper = "0.10"
