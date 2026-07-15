@@ -1,0 +1,17 @@
+/target
+**/*.rs.bk
+Cargo.lock
+node_modules
+dist
+.DS_Store
+# downloaded model weights
+/models
+*.gguf
+# Tauri build output
+apps/lluma-desktop/src-tauri/target
+apps/lluma-desktop/src-tauri/gen
+
+# lluma-desktop's dist/ is checked-in static frontend source (no build step),
+# not a build artifact — un-ignore it from the generic `dist` rule above.
+!apps/lluma-desktop/dist
+!apps/lluma-desktop/dist/**

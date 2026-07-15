@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+# Glob so the workspace stays valid as crates are added incrementally.
+# The Tauri app under apps/ declares its own [workspace] and is standalone.
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2021"
+license = "Apache-2.0"
+authors = ["Bodegga / Lluma"]
+repository = "https://github.com/bodegga/lluma"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+blake3 = "1"
+sysinfo = "0.33"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["stream"] }

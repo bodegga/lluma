@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lluma</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <header>
+      <h1>Lluma</h1>
+      <nav>
+        <button id="tab-contribute" class="tab active">Contribute</button>
+        <button id="tab-chat" class="tab">Chat</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="panel-contribute" class="panel">
+        <h2>Contribute compute</h2>
+        <p id="hw"></p>
+        <p id="rec"></p>
+        <button id="btn-detect">Detect my hardware</button>
+        <button id="btn-recommend">Recommend a model</button>
+      </section>
+
+      <section id="panel-chat" class="panel hidden">
+        <h2>Chat</h2>
+        <div id="output" aria-live="polite"></div>
+        <form id="chat-form">
+          <input id="prompt" type="text" placeholder="Ask anything…" autocomplete="off" />
+          <button type="submit">Send</button>
+        </form>
+      </section>
+    </main>
+
+    <script type="module" src="main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+[package]
+name = "lluma-runtime"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lluma-core = { path = "../lluma-core" }
+sysinfo = { workspace = true }
+llama-cpp-2 = "0.1"
+encoding_rs = "0.8"
+
+[target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
+nvml-wrapper = "0.10"
+
+[lints.rust]
+linker_messages = "allow"
