@@ -1,10 +1,8 @@
 [workspace]
 resolver = "2"
-members = [
-    "crates/lluma-core",
-    "crates/lluma-runtime",
-    "crates/lluma-registry",
-]
+# Glob so the workspace stays valid as crates are added incrementally.
+# The Tauri app under apps/ declares its own [workspace] and is standalone.
+members = ["crates/*"]
 
 [workspace.package]
 edition = "2021"
