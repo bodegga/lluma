@@ -1,8 +1,10 @@
 # Lluma website
 
-The Lluma marketing / vision landing page. A single, self-contained `index.html`
-(inline CSS + JS, no external requests, no build step). Design brief:
-[`docs/website-design-brief.md`](../../docs/website-design-brief.md).
+The Lluma landing page — a single, self-contained `index.html` (inline CSS + JS,
+embedded fonts, no external requests, no build step). The page reads as the
+protocol specification itself: numbered sections, ruled tables, the void figure,
+and a revision footer. Canonical design spec: [`DESIGN.md`](DESIGN.md)
+(`LLUMA-DESIGN-001`), which supersedes all prior visual direction.
 
 ## Preview locally
 
@@ -38,9 +40,12 @@ Or point an existing Droplet's nginx `root` at this folder — it's just static 
 
 ## Notes
 
-- Fully self-contained: no CDN, fonts, or remote images, so it works behind a strict CSP
-  and offline. The design relies on a distinctive system-font treatment; if you later want
-  a custom display face, self-host it (do not add an external font CDN) to keep the CSP tight.
-- Respects `prefers-reduced-motion`; responsive to mobile; WCAG AA text contrast.
+- Fully self-contained: zero external requests. The monospace face (Ioskeley Mono,
+  400/500/600) is embedded as `woff2` data URIs and the Bodegga egg mark is an inline
+  SVG — so it works behind a strict CSP and offline. Never add an external font/asset CDN;
+  if the Berkeley Mono web license is confirmed, swap the embedded `woff2`s 1:1 (the stack
+  already falls through to `"Berkeley Mono"` and system monos).
+- Respects `prefers-reduced-motion` (page fully static, only FIG. 01 animates otherwise);
+  responsive down to 360px with internally-scrolling tables; WCAG AA text contrast.
 - Copy is deliberately honest about the trust model (Open tier vs Confidential/TEE tier) —
   keep it that way if you edit; do not market the Open tier as "zero-knowledge".
