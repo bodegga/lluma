@@ -1,4 +1,3 @@
-#![allow(linker_messages, unused_attributes)]
 //! Lluma model runtime: hardware detection, recommendation, and GGUF inference.
 pub mod hardware;
 pub mod recommend;

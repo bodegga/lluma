@@ -14,3 +14,6 @@ encoding_rs = "0.8"
 
 [target.'cfg(any(target_os = "windows", target_os = "linux"))'.dependencies]
 nvml-wrapper = "0.10"
+
+[lints.rust]
+linker_messages = "allow"
