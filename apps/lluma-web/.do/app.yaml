@@ -9,7 +9,7 @@ region: nyc
 static_sites:
   - name: site
     github:
-      repo: REPLACE_ME/lluma        # e.g. bodegga/lluma
+      repo: bodegga/lluma
       branch: main
       deploy_on_push: true
     source_dir: apps/lluma-web
