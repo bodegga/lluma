@@ -1,0 +1,12 @@
+/target
+**/*.rs.bk
+Cargo.lock
+node_modules
+dist
+.DS_Store
+# downloaded model weights
+/models
+*.gguf
+# Tauri build output
+apps/lluma-desktop/src-tauri/target
+apps/lluma-desktop/dist
