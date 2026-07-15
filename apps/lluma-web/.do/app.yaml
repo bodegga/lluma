@@ -9,6 +9,9 @@
 # The site is a single self-contained index.html — no build step.
 name: lluma-web
 region: nyc
+domains:
+  - domain: lluma.bodegga.net
+    type: PRIMARY
 static_sites:
   - name: site
     git:
