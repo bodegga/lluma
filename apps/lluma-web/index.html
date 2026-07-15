@@ -6,14 +6,16 @@
 <meta name="color-scheme" content="dark" />
 <title>Lluma — Anonymous, peer-to-peer LLM inference</title>
 <meta name="description" content="Lluma is anonymous, contribution-based, peer-to-peer LLM inference. No single party ever holds both who you are and what you asked." />
+<link rel="icon" type="image/svg+xml" href="icon.svg" />
 <style>
   :root {
-    --void:      #0A0D18;
-    --surface:   #121728;
-    --surface-2: #1B2238;
-    --ink:       #EAECF5;
-    --muted:     #8C95B2;
-    --line:      #262E47;
+    --void:      #06070D;
+    --surface:   #0E1120;
+    --card:      #10142290;
+    --card-2:    #141A2E;
+    --line:      #222A42;
+    --ink:       #EDEFF7;
+    --muted:     #939CB8;
     --signal:    #46E6C4;
     --identity:  #FF9E64;
     --sans: "Inter Tight", system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -58,31 +60,42 @@
   .mono { font-family: var(--mono); font-variant-numeric: tabular-nums; }
   .tabular { font-variant-numeric: tabular-nums; }
 
+  /* ---------- Pill eyebrows ---------- */
   .eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
     font-family: var(--mono);
     text-transform: uppercase;
     letter-spacing: 0.18em;
-    font-size: 0.72rem;
+    font-size: 0.7rem;
     color: var(--signal);
-    margin: 0 0 14px;
+    background: rgba(70, 230, 196, 0.08);
+    border: 1px solid rgba(70, 230, 196, 0.25);
+    padding: 7px 15px;
+    border-radius: 999px;
+    margin: 0 0 18px;
   }
+  .eyebrow.center { display: inline-flex; }
+  .eyebrow-row { display: flex; }
+  .eyebrow-row.center { justify-content: center; }
 
   h1, h2, h3 {
     font-family: var(--sans);
     font-weight: 800;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.03em;
     margin: 0 0 0.5em;
     color: var(--ink);
   }
 
-  h1 { font-size: clamp(2.6rem, 6vw, 5.5rem); line-height: 1.04; letter-spacing: -0.03em; }
-  h2 { font-size: clamp(1.8rem, 3.6vw, 2.8rem); line-height: 1.15; }
-  h3 { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.4em; }
+  h1 { font-size: clamp(2.8rem, 6.5vw, 5.8rem); line-height: 1.03; }
+  h2 { font-size: clamp(2rem, 4vw, 3rem); line-height: 1.12; }
+  h3 { font-size: 1.15rem; font-weight: 700; margin-bottom: 0.4em; letter-spacing: -0.01em; }
 
   p { margin: 0 0 1em; }
   p.body-lg { font-size: 1.15rem; color: var(--muted); max-width: 640px; }
   .muted { color: var(--muted); }
-  .fine { color: var(--muted); font-size: 0.9rem; max-width: 640px; }
+  .fine { color: var(--muted); font-size: 0.9rem; max-width: 760px; }
 
   /* ---------- Buttons ---------- */
   .btn {
@@ -115,9 +128,9 @@
     transition: background 0.25s ease, border-color 0.25s ease;
   }
   .nav.is-solid {
-    background: rgba(18, 23, 40, 0.92);
+    background: rgba(10, 12, 21, 0.86);
     border-bottom-color: var(--line);
-    backdrop-filter: blur(8px);
+    backdrop-filter: blur(10px);
   }
   .nav-inner {
     max-width: 1180px;
@@ -137,9 +150,7 @@
     letter-spacing: -0.02em;
     color: var(--ink);
   }
-  .beacon-glyph { display: inline-flex; gap: 3px; }
-  .beacon-glyph i { width: 5px; height: 5px; border-radius: 50%; background: var(--signal); display: block; font-style: normal; }
-  .beacon-glyph i:nth-child(2) { opacity: 0.45; }
+  .wordmark img { width: 24px; height: 24px; display: block; }
 
   .primary-nav { display: flex; align-items: center; }
   .nav-links { display: flex; align-items: center; gap: 28px; }
@@ -167,35 +178,45 @@
     overflow: hidden;
     padding-top: var(--nav-h);
   }
-  #meshCanvas {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    pointer-events: none;
-  }
   .hero-glow {
     position: absolute;
     inset: 0;
-    background: radial-gradient(ellipse 60% 45% at 50% 18%, rgba(70, 230, 196, 0.10), transparent 60%);
+    background: radial-gradient(ellipse 60% 45% at 50% 12%, rgba(70, 230, 196, 0.10), transparent 60%);
     pointer-events: none;
   }
   .hero-inner {
     position: relative;
     z-index: 2;
-    max-width: 900px;
+    max-width: 980px;
     margin: 0 auto;
-    padding: 48px 24px;
+    padding: 56px 24px 48px;
     text-align: center;
   }
-  .hero-inner .eyebrow { display: flex; justify-content: center; }
   .cta-row {
     display: flex;
     gap: 16px;
     justify-content: center;
     flex-wrap: wrap;
-    margin: 28px 0 36px;
+    margin: 28px 0 8px;
   }
+
+  /* ---------- The anonymous void (hero centerpiece) ---------- */
+  .void-wrap {
+    position: relative;
+    width: min(560px, 88vw);
+    aspect-ratio: 1 / 1;
+    margin: 36px auto 20px;
+  }
+  .void-svg, .void-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+  }
+  .void-canvas { pointer-events: none; }
+  .void-svg .chip-label { font-family: var(--mono); font-size: 13px; fill: var(--ink); }
+  .void-svg .chip-fill { fill: var(--card-2); }
+
   .ticker {
     font-family: var(--mono);
     font-size: 0.82rem;
@@ -204,59 +225,83 @@
     gap: 10px;
     justify-content: center;
     flex-wrap: wrap;
-    margin: 0;
+    margin: 8px 0 0;
   }
   .ticker .sep { color: var(--line); }
 
   /* ---------- Sections ---------- */
-  .section { padding: 96px 0; border-top: 1px solid var(--line); position: relative; }
+  .section { padding: 104px 0; border-top: 1px solid var(--line); position: relative; }
   main > .hero + .section { border-top: none; }
 
   .reveal { opacity: 1; transform: none; transition: opacity 0.6s ease, transform 0.6s ease; }
   .reveal.reveal-armed { opacity: 0; transform: translateY(16px); }
   .reveal.reveal-armed.is-visible { opacity: 1; transform: none; }
 
-  /* ---------- Problem ---------- */
-  .chip-row { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 32px; }
-  .chip {
-    display: flex;
-    align-items: center;
-    gap: 14px;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    padding: 16px 18px;
-    flex: 1 1 220px;
+  /* ---------- Card system ---------- */
+  .card-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 20px;
+    margin-top: 36px;
   }
-  .chip-figure { font-family: var(--mono); font-size: 1.4rem; color: var(--ink); min-width: 2.4ch; }
-  .chip span:last-child { color: var(--muted); font-size: 0.92rem; }
+  .card-grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .card-grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .card-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
 
-  /* ---------- Guarantee / split of knowledge ---------- */
+  .card {
+    position: relative;
+    background: var(--card);
+    border: 1px solid var(--line);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    border-radius: 16px;
+    padding: 26px;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.32);
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+  }
+  .card:hover {
+    transform: translateY(-3px);
+    border-color: rgba(70, 230, 196, 0.4);
+    background: var(--card-2);
+    box-shadow: 0 16px 36px rgba(0, 0, 0, 0.42), 0 0 0 1px rgba(70, 230, 196, 0.10), 0 0 26px rgba(70, 230, 196, 0.12);
+  }
+  .card-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    background: rgba(70, 230, 196, 0.08);
+    color: var(--signal);
+    margin-bottom: 16px;
+  }
+  .card-icon.is-identity { background: rgba(255, 158, 100, 0.08); color: var(--identity); }
+  .card-icon svg.icon { width: 22px; height: 22px; }
+  .icon { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+  .card h3 { margin-bottom: 8px; }
+  .card p.card-desc { color: var(--muted); font-size: 0.94rem; margin: 0; }
+  .card-data {
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    color: var(--signal);
+    letter-spacing: 0.02em;
+    margin: 18px 0 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+  }
+  .card-data.is-identity { color: var(--identity); }
+
+  /* ---------- Split of knowledge ---------- */
   .statement { max-width: 820px; }
   .hl-identity { color: var(--identity); }
   .hl-signal { color: var(--signal); }
 
   .diagram-scroll { overflow-x: auto; margin: 40px 0 28px; padding-bottom: 10px; }
   .split-diagram { display: flex; gap: 20px; min-width: 640px; }
-  .split-card {
-    flex: 1;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 24px;
-    min-width: 200px;
-  }
-  .split-card h3 {
-    font-family: var(--mono);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    font-size: 0.82rem;
-    color: var(--muted);
-    margin-bottom: 18px;
-    font-weight: 600;
-  }
-  .split-card ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
-  .split-card li { position: relative; padding-left: 20px; font-size: 0.92rem; }
+  .split-card.card { flex: 1; min-width: 200px; padding: 28px; }
+  .split-card ul { list-style: none; margin: 16px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
+  .split-card li { position: relative; padding-left: 20px; font-size: 0.92rem; color: var(--ink); }
   .split-card li::before {
     content: "";
     position: absolute;
@@ -269,7 +314,7 @@
   .split-card li.never { color: var(--muted); }
 
   .caveat {
-    margin-top: 8px;
+    margin-top: 28px;
     color: var(--muted);
     font-size: 0.95rem;
     max-width: 760px;
@@ -279,54 +324,46 @@
   .caveat strong { color: var(--ink); }
 
   /* ---------- How it works ---------- */
-  .steps { list-style: none; margin: 40px 0 0; padding: 0; }
-  .steps li {
-    display: flex;
-    gap: 24px;
-    padding: 28px 0;
-    border-top: 1px solid var(--line);
-    align-items: flex-start;
+  .steps { margin: 36px 0 0; padding: 0; }
+  .step-card { display: flex; gap: 20px; align-items: flex-start; }
+  .step-no {
+    font-family: var(--mono);
+    font-size: 1.5rem;
+    color: var(--signal);
+    line-height: 1;
+    min-width: 2ch;
   }
-  .steps li:first-child { border-top: none; }
-  .step-no { font-size: 1.4rem; color: var(--signal); min-width: 2.6ch; line-height: 1.2; }
-  .steps h3 { margin-bottom: 6px; }
-  .steps p { color: var(--muted); margin: 0; max-width: 560px; }
+  .step-card p.card-desc { max-width: 460px; }
 
   /* ---------- Network / torrent visual ---------- */
   .torrent-visual { padding: 8px 0 4px; }
   .torrent-visual svg { min-width: 640px; }
   .torrent-visual .links line { stroke: var(--line); stroke-width: 1; }
   .torrent-visual .peers circle { fill: var(--muted); opacity: 0.85; }
-  .torrent-visual .seeds circle { fill: var(--surface-2); stroke: var(--ink); stroke-width: 1.2; opacity: 0.9; }
-  .torrent-visual .seeds .ring { fill: none; stroke: var(--line); }
-  .torrent-visual .tracker circle { fill: var(--surface-2); stroke: var(--muted); stroke-width: 1.4; }
+  .torrent-visual .seeds rect { fill: var(--card-2); stroke: var(--signal); stroke-opacity: 0.55; stroke-width: 1.2; }
+  .torrent-visual .tracker rect { fill: var(--card-2); stroke: var(--muted); stroke-width: 1.2; }
   .torrent-visual text { font-family: var(--mono); font-size: 11px; fill: var(--muted); }
 
   /* ---------- Contribute ---------- */
-  .tier-row { display: flex; gap: 20px; margin-top: 36px; flex-wrap: wrap; }
-  .tier-card {
-    flex: 1 1 220px;
-    background: var(--surface);
-    border: 1px solid var(--line);
-    border-radius: 14px;
-    padding: 26px;
-  }
-  .tier-stars { font-family: var(--mono); color: var(--ink); font-size: 1rem; margin-bottom: 14px; letter-spacing: 0.1em; }
-  .tier-card p:last-child { color: var(--muted); font-size: 0.92rem; margin-bottom: 0; }
+  .tier-stars { font-family: var(--mono); color: var(--ink); font-size: 1rem; margin-bottom: 4px; letter-spacing: 0.1em; }
 
   /* ---------- Trust tiers ---------- */
-  .tiers-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 36px; }
-  .tier-panel { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 32px; }
-  .tier-tag { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); letter-spacing: 0.04em; margin-bottom: 14px; text-transform: uppercase; }
-  .tier-panel p:last-child { color: var(--muted); margin-bottom: 0; }
+  .tier-panel.card { padding: 34px; }
+  .tier-tag-lg { font-family: var(--mono); font-size: 0.78rem; color: var(--muted); letter-spacing: 0.04em; margin-bottom: 16px; text-transform: uppercase; }
 
   /* ---------- CTA ---------- */
-  .cta-section { text-align: center; }
+  .cta-section { text-align: center; overflow: hidden; }
+  .cta-glow {
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 50% 30%, rgba(70, 230, 196, 0.10), transparent 60%);
+    pointer-events: none;
+  }
   .install-hint {
     margin-top: 22px;
     display: inline-block;
     color: var(--muted);
-    background: var(--surface-2);
+    background: var(--card-2);
     padding: 12px 20px;
     border-radius: 8px;
     border: 1px solid var(--line);
@@ -337,7 +374,7 @@
   .footer-inner { display: flex; flex-wrap: wrap; gap: 40px; justify-content: space-between; align-items: flex-start; }
   .footer-story { max-width: 420px; }
   .footer-story p { color: var(--muted); font-size: 0.92rem; }
-  .wordmark.small { font-weight: 800; font-size: 1.1rem; color: var(--ink); margin-bottom: 8px; }
+  .wordmark.small { font-weight: 800; font-size: 1.1rem; color: var(--ink); margin-bottom: 10px; }
   .status-line { display: flex; align-items: center; gap: 9px; color: var(--muted); font-size: 0.85rem; margin: 0; }
   .status-dot {
     width: 8px; height: 8px;
@@ -376,31 +413,81 @@
     .nav-links.is-open { max-height: 320px; opacity: 1; padding: 6px 0; visibility: visible; transition: max-height 0.25s ease, opacity 0.2s ease, visibility 0s; }
     .nav-links a:not(.btn) { padding: 12px 18px; width: 100%; }
     .nav-links a.btn { margin: 10px 18px; justify-content: center; }
-  }
-
-  @media (max-width: 700px) {
-    .tiers-grid { grid-template-columns: 1fr; }
+    .card-grid.cols-2, .card-grid.cols-3, .card-grid.cols-4 { grid-template-columns: 1fr; }
   }
 
   @media (max-width: 480px) {
-    .steps li { gap: 14px; }
-    .section { padding: 64px 0; }
-    .hero-inner { padding: 32px 20px; }
+    .section { padding: 68px 0; }
+    .hero-inner { padding: 40px 20px 32px; }
+    .void-svg .chip-label { display: none; }
   }
 
   @media (prefers-reduced-motion: reduce) {
     html { scroll-behavior: auto; }
     .reveal, .btn { transition: none; }
     .nav-links { transition: none; }
+    .card:hover { transform: none; }
   }
 </style>
 </head>
 <body>
 
+<!-- Custom line-icon set (inline sprite, reused via <use>) -->
+<svg style="position:absolute;width:0;height:0;overflow:hidden" aria-hidden="true">
+  <defs>
+    <symbol id="i-link" viewBox="0 0 24 24">
+      <circle cx="9" cy="12" r="4"/><circle cx="15" cy="12" r="4"/>
+    </symbol>
+    <symbol id="i-infinity" viewBox="0 0 24 24">
+      <path d="M7 9c-1.7 0-3 1.3-3 3s1.3 3 3 3c2.5 0 3.5-6 6-6s3.5 6 6 6c1.7 0 3-1.3 3-3s-1.3-3-3-3c-2.5 0-3.5 6-6 6s-3.5-6-6-6z"/>
+    </symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24">
+      <path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6z"/><circle cx="12" cy="12" r="3"/>
+    </symbol>
+    <symbol id="i-relay" viewBox="0 0 24 24">
+      <path d="M4 8h11"/><path d="M11 4l4 4-4 4"/><path d="M20 16H9"/><path d="M13 12l-4 4 4 4"/>
+    </symbol>
+    <symbol id="i-broker" viewBox="0 0 24 24">
+      <path d="M12 3v6"/><path d="M12 15v6"/><path d="M12 9l-6 3 6 3 6-3-6-3z"/>
+    </symbol>
+    <symbol id="i-host" viewBox="0 0 24 24">
+      <rect x="4" y="4" width="16" height="16" rx="2"/>
+      <path d="M9 4V2"/><path d="M15 4V2"/><path d="M9 22v-2"/><path d="M15 22v-2"/>
+      <path d="M4 9H2"/><path d="M4 15H2"/><path d="M22 9h-2"/><path d="M22 15h-2"/>
+    </symbol>
+    <symbol id="i-seed" viewBox="0 0 24 24">
+      <circle cx="5" cy="12" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="19" cy="18" r="2.2"/>
+      <path d="M7 11l10-4"/><path d="M7 13l10 4"/>
+    </symbol>
+    <symbol id="i-key" viewBox="0 0 24 24">
+      <circle cx="8" cy="15" r="4"/><path d="M11 12l9-9"/><path d="M16 7l3 3"/><path d="M13 10l2 2"/>
+    </symbol>
+    <symbol id="i-hash" viewBox="0 0 24 24">
+      <path d="M9 3L7 21"/><path d="M17 3l-2 18"/><path d="M4 9h17"/><path d="M3 15h17"/>
+    </symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24">
+      <rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6"/>
+      <path d="M9 5V2"/><path d="M15 5V2"/><path d="M9 22v-3"/><path d="M15 22v-3"/>
+      <path d="M5 9H2"/><path d="M5 15H2"/><path d="M22 9h-3"/><path d="M22 15h-3"/>
+    </symbol>
+    <symbol id="i-beacon" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="1.6" fill="currentColor" stroke="none"/>
+      <circle cx="12" cy="12" r="5.2" opacity="0.75"/>
+      <circle cx="12" cy="12" r="9" opacity="0.4"/>
+    </symbol>
+    <symbol id="i-unlock" viewBox="0 0 24 24">
+      <rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 017.8-1.2"/>
+    </symbol>
+    <symbol id="i-lock" viewBox="0 0 24 24">
+      <rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V7a4 4 0 018 0v4"/>
+    </symbol>
+  </defs>
+</svg>
+
 <header class="nav" id="siteNav">
   <div class="nav-inner">
     <a href="#top" class="wordmark" aria-label="Lluma home">
-      <span class="beacon-glyph" aria-hidden="true"><i></i><i></i></span>
+      <img src="icon.svg" alt="" width="24" height="24" />
       Lluma
     </a>
     <nav class="primary-nav" aria-label="Primary">
@@ -420,7 +507,6 @@
 <main id="top">
 
   <section class="hero" id="hero">
-    <canvas id="meshCanvas" aria-hidden="true"></canvas>
     <div class="hero-glow" aria-hidden="true"></div>
     <div class="hero-inner">
       <p class="eyebrow">Bodegga · Anonymous inference</p>
@@ -433,6 +519,97 @@
         <a href="#contribute" class="btn btn-primary">Run a node</a>
         <a href="#how-it-works" class="btn btn-ghost">See how it works ↓</a>
       </div>
+
+      <div class="void-wrap" id="voidWrap">
+        <svg class="void-svg" viewBox="0 0 600 600" role="img" aria-label="Illustration of Lluma's anonymous void: host chips send encrypted links inward that dissolve at the rim before reaching the center, so no host chip is ever linked to another">
+          <defs>
+            <radialGradient id="voidGlow" cx="50%" cy="50%" r="50%">
+              <stop offset="0%" stop-color="#46E6C4" stop-opacity="0.14"/>
+              <stop offset="55%" stop-color="#46E6C4" stop-opacity="0.04"/>
+              <stop offset="100%" stop-color="#46E6C4" stop-opacity="0"/>
+            </radialGradient>
+            <radialGradient id="voidFill" cx="50%" cy="45%" r="60%">
+              <stop offset="0%" stop-color="#1B2238"/>
+              <stop offset="60%" stop-color="#0A0D18"/>
+              <stop offset="100%" stop-color="#05060B"/>
+            </radialGradient>
+            <linearGradient id="linkContent" x1="300" y1="75" x2="300" y2="222" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#46E6C4" stop-opacity="0.6"/>
+              <stop offset="100%" stop-color="#46E6C4" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="linkIdentity" x1="300" y1="525" x2="300" y2="378" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#FF9E64" stop-opacity="0.6"/>
+              <stop offset="100%" stop-color="#FF9E64" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="linkN1" x1="495" y1="187.5" x2="367.5" y2="261" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#8C95B2" stop-opacity="0.5"/>
+              <stop offset="100%" stop-color="#8C95B2" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="linkN2" x1="495" y1="412.5" x2="367.5" y2="339" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#8C95B2" stop-opacity="0.5"/>
+              <stop offset="100%" stop-color="#8C95B2" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="linkN3" x1="105" y1="412.5" x2="232.5" y2="339" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#8C95B2" stop-opacity="0.5"/>
+              <stop offset="100%" stop-color="#8C95B2" stop-opacity="0"/>
+            </linearGradient>
+            <linearGradient id="linkN4" x1="105" y1="187.5" x2="232.5" y2="261" gradientUnits="userSpaceOnUse">
+              <stop offset="0%" stop-color="#8C95B2" stop-opacity="0.5"/>
+              <stop offset="100%" stop-color="#8C95B2" stop-opacity="0"/>
+            </linearGradient>
+          </defs>
+
+          <circle cx="300" cy="300" r="280" fill="url(#voidGlow)"/>
+
+          <!-- beaded links: flow inward, dissolve before crossing the rim -->
+          <g fill="none" stroke-linecap="round">
+            <path d="M300 75 L300 222" stroke="url(#linkContent)" stroke-width="2.4" stroke-dasharray="2 11"/>
+            <path d="M300 525 L300 378" stroke="url(#linkIdentity)" stroke-width="2.4" stroke-dasharray="2 11"/>
+            <path d="M495 187.5 L367.5 261" stroke="url(#linkN1)" stroke-width="1.8" stroke-dasharray="1.5 10"/>
+            <path d="M495 412.5 L367.5 339" stroke="url(#linkN2)" stroke-width="1.8" stroke-dasharray="1.5 10"/>
+            <path d="M105 412.5 L232.5 339" stroke="url(#linkN3)" stroke-width="1.8" stroke-dasharray="1.5 10"/>
+            <path d="M105 187.5 L232.5 261" stroke="url(#linkN4)" stroke-width="1.8" stroke-dasharray="1.5 10"/>
+          </g>
+
+          <!-- the anonymous void -->
+          <circle cx="300" cy="300" r="70" fill="url(#voidFill)" stroke="#222A42" stroke-width="1.5"/>
+          <circle cx="300" cy="300" r="78" fill="none" stroke="#46E6C4" stroke-width="1.2" opacity="0.32"/>
+
+          <!-- host chips -->
+          <g>
+            <rect class="chip-fill" x="246" y="58" width="108" height="34" rx="10" stroke="#46E6C4" stroke-opacity="0.65" stroke-width="1.4"/>
+            <circle cx="261" cy="75" r="4" fill="#46E6C4"/>
+            <text class="chip-label" x="273" y="79">host·c9a2</text>
+          </g>
+          <g>
+            <rect class="chip-fill" x="246" y="508" width="108" height="34" rx="10" stroke="#FF9E64" stroke-opacity="0.65" stroke-width="1.4"/>
+            <circle cx="261" cy="525" r="4" fill="#FF9E64"/>
+            <text class="chip-label" x="273" y="529">host·4e1f</text>
+          </g>
+          <g>
+            <rect class="chip-fill" x="441" y="170.5" width="108" height="34" rx="10" stroke="#222A42" stroke-width="1.4"/>
+            <circle cx="456" cy="187.5" r="4" fill="#939CB8"/>
+            <text class="chip-label" x="468" y="191.5">seed·b91c</text>
+          </g>
+          <g>
+            <rect class="chip-fill" x="441" y="395.5" width="108" height="34" rx="10" stroke="#222A42" stroke-width="1.4"/>
+            <circle cx="456" cy="412.5" r="4" fill="#939CB8"/>
+            <text class="chip-label" x="468" y="416.5">24ms</text>
+          </g>
+          <g>
+            <rect class="chip-fill" x="51" y="395.5" width="108" height="34" rx="10" stroke="#222A42" stroke-width="1.4"/>
+            <circle cx="66" cy="412.5" r="4" fill="#939CB8"/>
+            <text class="chip-label" x="78" y="416.5">blake3:9f2a</text>
+          </g>
+          <g>
+            <rect class="chip-fill" x="51" y="170.5" width="108" height="34" rx="10" stroke="#222A42" stroke-width="1.4"/>
+            <circle cx="66" cy="187.5" r="4" fill="#939CB8"/>
+            <text class="chip-label" x="78" y="191.5">peer·7d31</text>
+          </g>
+        </svg>
+        <canvas class="void-canvas" id="voidCanvas" aria-hidden="true"></canvas>
+      </div>
+
       <p class="ticker mono" aria-label="Network status, illustrative">
         <span>peers·<span class="tabular">1,204</span></span>
         <span class="sep">·</span>
@@ -444,7 +621,7 @@
   </section>
 
   <section class="section" id="problem">
-    <div class="container narrow reveal">
+    <div class="container reveal">
       <p class="eyebrow">The problem</p>
       <h2>Your AI chats aren't private.</h2>
       <p class="body-lg">
@@ -452,19 +629,22 @@
         quietly used to build a profile of you. The provider doesn't just answer your
         question — it remembers who asked.
       </p>
-      <div class="chip-row">
-        <div class="chip">
-          <span class="chip-figure mono">1:1</span>
-          <span>Prompt and identity, permanently linked</span>
-        </div>
-        <div class="chip">
-          <span class="chip-figure mono">∞</span>
-          <span>Retention windows you don't control</span>
-        </div>
-        <div class="chip">
-          <span class="chip-figure mono">1</span>
-          <span>One party holds the whole picture</span>
-        </div>
+      <div class="card-grid cols-3">
+        <article class="card">
+          <span class="card-icon is-identity"><svg class="icon" aria-hidden="true"><use href="#i-link"></use></svg></span>
+          <h3>Prompt and identity, permanently linked</h3>
+          <p class="card-data is-identity mono">1:1</p>
+        </article>
+        <article class="card">
+          <span class="card-icon is-identity"><svg class="icon" aria-hidden="true"><use href="#i-infinity"></use></svg></span>
+          <h3>Retention windows you don't control</h3>
+          <p class="card-data is-identity mono">&#8734;</p>
+        </article>
+        <article class="card">
+          <span class="card-icon is-identity"><svg class="icon" aria-hidden="true"><use href="#i-eye"></use></svg></span>
+          <h3>One party holds the whole picture</h3>
+          <p class="card-data is-identity mono">1</p>
+        </article>
       </div>
     </div>
   </section>
@@ -480,26 +660,32 @@
 
       <div class="diagram-scroll">
         <div class="split-diagram">
-          <article class="split-card">
+          <article class="split-card card">
+            <span class="card-icon is-identity"><svg class="icon" aria-hidden="true"><use href="#i-relay"></use></svg></span>
             <h3>Relay</h3>
             <ul>
               <li class="identity">Sees: your IP address</li>
               <li class="signal never">Never sees: your prompt — it stays encrypted</li>
             </ul>
+            <p class="card-data is-identity mono">sees: ip</p>
           </article>
-          <article class="split-card">
+          <article class="split-card card">
+            <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-broker"></use></svg></span>
             <h3>Broker</h3>
             <ul>
               <li class="signal">Sees: ciphertext and routing metadata</li>
               <li class="identity never">Never sees: who you are</li>
             </ul>
+            <p class="card-data mono">sees: ciphertext</p>
           </article>
-          <article class="split-card">
+          <article class="split-card card">
+            <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-host"></use></svg></span>
             <h3>Host</h3>
             <ul>
               <li class="signal">Sees: the decrypted prompt</li>
               <li class="identity never">Never sees: your identity</li>
             </ul>
+            <p class="card-data mono">sees: prompt</p>
           </article>
         </div>
       </div>
@@ -517,36 +703,36 @@
     <div class="container reveal">
       <p class="eyebrow">How it works</p>
       <h2>Four hops. No single witness.</h2>
-      <ol class="steps">
-        <li>
+      <div class="steps card-grid cols-4">
+        <article class="card step-card">
           <span class="step-no mono">01</span>
           <div>
             <h3>Prove without revealing</h3>
-            <p>A blind-signed token proves you're entitled to a request without revealing who you are.</p>
+            <p class="card-desc">A blind-signed token proves you're entitled to a request without revealing who you are.</p>
           </div>
-        </li>
-        <li>
+        </article>
+        <article class="card step-card">
           <span class="step-no mono">02</span>
           <div>
             <h3>Route through a relay</h3>
-            <p>Your request passes through a relay that sees your IP address — never your prompt.</p>
+            <p class="card-desc">Your request passes through a relay that sees your IP address — never your prompt.</p>
           </div>
-        </li>
-        <li>
+        </article>
+        <article class="card step-card">
           <span class="step-no mono">03</span>
           <div>
             <h3>Matched by a broker</h3>
-            <p>The broker matches you to the nearest fast host by latency. It sees ciphertext, not you.</p>
+            <p class="card-desc">The broker matches you to the nearest fast host by latency. It sees ciphertext, not you.</p>
           </div>
-        </li>
-        <li>
+        </article>
+        <article class="card step-card">
           <span class="step-no mono">04</span>
           <div>
             <h3>Answered by a peer</h3>
-            <p>A volunteer host runs the model and streams the answer back. It sees the prompt, never you.</p>
+            <p class="card-desc">A volunteer host runs the model and streams the answer back. It sees the prompt, never you.</p>
           </div>
-        </li>
-      </ol>
+        </article>
+      </div>
     </div>
   </section>
 
@@ -554,19 +740,14 @@
     <div class="container reveal">
       <p class="eyebrow">The network</p>
       <h2>Torrent for intelligence.</h2>
-      <p class="body-lg">
-        Model weights move like torrents — content-addressed with BLAKE3, seeded peer to peer
-        across the network. Each individual request still runs the whole model on one nearby
-        host, so answers stay fast and coherent.
-      </p>
 
       <div class="diagram-scroll">
         <div class="torrent-visual">
           <svg viewBox="0 0 720 260" width="720" height="260" role="img" aria-label="Diagram showing a tracker node coordinating several seed nodes, which distribute model weights to peer nodes across the mesh">
             <g class="links">
-              <line x1="360" y1="36" x2="140" y2="120" />
-              <line x1="360" y1="36" x2="360" y2="120" />
-              <line x1="360" y1="36" x2="580" y2="120" />
+              <line x1="360" y1="34" x2="140" y2="120" />
+              <line x1="360" y1="34" x2="360" y2="120" />
+              <line x1="360" y1="34" x2="580" y2="120" />
               <line x1="140" y1="120" x2="80" y2="210" />
               <line x1="140" y1="120" x2="200" y2="230" />
               <line x1="360" y1="120" x2="300" y2="200" />
@@ -585,30 +766,45 @@
               <circle cx="640" cy="220" r="3.5" />
             </g>
             <g class="seeds">
-              <circle cx="140" cy="120" r="6" />
-              <circle cx="140" cy="120" r="10" class="ring" />
-              <circle cx="360" cy="120" r="6" />
-              <circle cx="360" cy="120" r="10" class="ring" />
-              <circle cx="580" cy="120" r="6" />
-              <circle cx="580" cy="120" r="10" class="ring" />
+              <rect x="96" y="107" width="88" height="26" rx="8" />
+              <rect x="316" y="107" width="88" height="26" rx="8" />
+              <rect x="536" y="107" width="88" height="26" rx="8" />
             </g>
             <g class="tracker">
-              <circle cx="360" cy="36" r="7" />
+              <rect x="332" y="22" width="56" height="24" rx="7" />
             </g>
             <g class="labels">
-              <text x="374" y="40">tracker</text>
-              <text x="152" y="106">seed·b91c04</text>
+              <text x="345" y="38">tracker</text>
+              <text x="106" y="124">seed·b91c04</text>
+              <text x="326" y="124">seed·2f61ac</text>
+              <text x="546" y="124">seed·88e3f0</text>
               <text x="212" y="248">peer·7f3a2c</text>
+              <text x="432" y="248">24ms</text>
             </g>
           </svg>
         </div>
       </div>
 
-      <p class="fine">
-        Self-healing by design: if a host drops mid-download, the tracker just points peers
-        elsewhere. The same latency beaconing that seeds routing also keeps the mesh honest
-        about who's actually fast right now.
-      </p>
+      <div class="card-grid cols-3">
+        <article class="card">
+          <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-hash"></use></svg></span>
+          <h3>Content-addressed weights</h3>
+          <p class="card-desc">Model weights move like torrents — content-addressed with BLAKE3, seeded peer to peer across the network.</p>
+          <p class="card-data mono">blake3</p>
+        </article>
+        <article class="card">
+          <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-cpu"></use></svg></span>
+          <h3>Whole model, one host</h3>
+          <p class="card-desc">Each individual request still runs the whole model on one nearby host, so answers stay fast and coherent.</p>
+          <p class="card-data mono">1 host / request</p>
+        </article>
+        <article class="card">
+          <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-beacon"></use></svg></span>
+          <h3>Self-healing &amp; beaconing</h3>
+          <p class="card-desc">If a host drops mid-download, the tracker just points peers elsewhere — the same latency beaconing that seeds routing keeps the mesh honest about who's actually fast right now.</p>
+          <p class="card-data mono">heartbeat·5s</p>
+        </article>
+      </div>
     </div>
   </section>
 
@@ -620,21 +816,27 @@
         Lluma runs on skin in the game, tiered to whatever hardware you've got. Everyone
         puts something in before they take something out — no leeching.
       </p>
-      <div class="tier-row">
-        <article class="tier-card">
+      <div class="card-grid cols-3">
+        <article class="card">
+          <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-host"></use></svg></span>
           <p class="tier-stars">★ ★ ★</p>
           <h3>Host a model</h3>
-          <p>Run inference for the network on your GPU. The biggest contribution earns the most credit.</p>
+          <p class="card-desc">Run inference for the network on your GPU. The biggest contribution earns the most credit.</p>
+          <p class="card-data mono">earns ★★★</p>
         </article>
-        <article class="tier-card">
+        <article class="card">
+          <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-seed"></use></svg></span>
           <p class="tier-stars">★ ★ ☆</p>
           <h3>Seed + relay</h3>
-          <p>Help distribute model weights and relay encrypted traffic for other peers.</p>
+          <p class="card-desc">Help distribute model weights and relay encrypted traffic for other peers.</p>
+          <p class="card-data mono">earns ★★</p>
         </article>
-        <article class="tier-card">
+        <article class="card">
+          <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-key"></use></svg></span>
           <p class="tier-stars">★ ★ ☆</p>
           <h3>Donate an API key</h3>
-          <p>Contribute spare capacity from a commercial provider key you already have.</p>
+          <p class="card-desc">Contribute spare capacity from a commercial provider key you already have.</p>
+          <p class="card-data mono">earns ★★</p>
         </article>
       </div>
     </div>
@@ -644,31 +846,36 @@
     <div class="container reveal">
       <p class="eyebrow">Trust tiers</p>
       <h2>Choose your tier, per request.</h2>
-      <div class="tiers-grid">
-        <article class="tier-panel">
+      <div class="card-grid cols-2">
+        <article class="tier-panel card">
+          <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-unlock"></use></svg></span>
           <h3>Open</h3>
-          <p class="tier-tag mono">Any GPU · unlinkable · signed no-log software</p>
-          <p>
+          <p class="tier-tag-lg mono">Any GPU · unlinkable · signed no-log software</p>
+          <p class="card-desc">
             Runs on any volunteer host. The host can read the prompt it's asked to answer —
             it just has no way to connect that prompt to you. Host software is signed and
             built to keep no logs.
           </p>
+          <p class="card-data mono">tier: open</p>
         </article>
-        <article class="tier-panel">
+        <article class="tier-panel card">
+          <span class="card-icon"><svg class="icon" aria-hidden="true"><use href="#i-lock"></use></svg></span>
           <h3>Confidential</h3>
-          <p class="tier-tag mono">TEE-attested · operator-blind</p>
-          <p>
+          <p class="tier-tag-lg mono">TEE-attested · operator-blind</p>
+          <p class="card-desc">
             Runs inside a hardware-attested trusted execution environment. Even the person
             operating the machine can't see the prompt or the answer.
           </p>
+          <p class="card-data mono">tier: tee</p>
         </article>
       </div>
     </div>
   </section>
 
   <section class="section cta-section" id="cta">
+    <div class="cta-glow" aria-hidden="true"></div>
     <div class="container narrow center reveal">
-      <p class="eyebrow" style="justify-content:center;display:flex;">Get started</p>
+      <p class="eyebrow" style="justify-content:center;display:inline-flex;">Get started</p>
       <h2>Join the mesh.</h2>
       <p class="body-lg" style="margin-left:auto;margin-right:auto;">
         Run a node, contribute capacity, and help carry inference that no one can trace back to anyone.
@@ -683,7 +890,7 @@
 <footer class="site-footer">
   <div class="container footer-inner">
     <div class="footer-story">
-      <p class="wordmark small">Lluma</p>
+      <p class="wordmark small"><img src="icon.svg" alt="" width="22" height="22" style="display:inline-block;vertical-align:middle;margin-right:8px;" />Lluma</p>
       <p>
         The double-L nods to <strong>LLM</strong>, and the name plays on Peta<strong>luma</strong>.
         Lluma is part of the <strong>Bodegga</strong> family of projects.
@@ -755,290 +962,109 @@
     }
   }
 
-  /* ---------------- The Mesh ---------------- */
-  var canvas = document.getElementById('meshCanvas');
-  var hero = document.getElementById('hero');
-  if (!canvas || !canvas.getContext || !hero) { return; }
+  /* ---------------- The anonymous void (hero centerpiece) ---------------- */
+  var wrap = document.getElementById('voidWrap');
+  var canvas = document.getElementById('voidCanvas');
+  if (!wrap || !canvas || !canvas.getContext) { return; }
   var ctx = canvas.getContext('2d');
   if (!ctx) { return; }
 
-  var LINK_DIST = 150;
-  var COLOR_LINE = 'rgba(38, 46, 71, ';
-  var COLOR_NODE = 'rgba(140, 149, 178, 0.55)';
-  var COLOR_SIGNAL = 'rgba(70, 230, 196, ';
-  var COLOR_IDENTITY = 'rgba(255, 158, 100, ';
-  var COLOR_INK = 'rgba(234, 236, 245, ';
+  // Coordinates live in a fixed 0-600 space that matches the inline SVG's
+  // viewBox, so canvas beads line up exactly with the static chips/links.
+  var VB = 600;
+  var CX = 300, CY = 300;
+  var VOID_R = 70, RIM_R = 78;
 
-  var width = 0, height = 0, dpr = 1;
-  var nodes = [];
+  var LINKS = [
+    { x1: 300, y1: 75,    x2: 300,   y2: 222,  color: [70, 230, 196] },  // content host (aqua)
+    { x1: 300, y1: 525,   x2: 300,   y2: 378,  color: [255, 158, 100] }, // identity host (amber)
+    { x1: 495, y1: 187.5, x2: 367.5, y2: 261,  color: [147, 156, 184] },
+    { x1: 495, y1: 412.5, x2: 367.5, y2: 339,  color: [147, 156, 184] },
+    { x1: 105, y1: 412.5, x2: 232.5, y2: 339,  color: [147, 156, 184] },
+    { x1: 105, y1: 187.5, x2: 232.5, y2: 261,  color: [147, 156, 184] }
+  ];
+  var BEAD_PHASES = [0, 0.5, 0.25];
+
+  var width = 0, height = 0, scale = 1, dpr = 1;
   var rafId = null;
-  var beacon = null;
-  var split = null;
+  var beaconStart = null;
   var nextBeaconAt = 0;
-  var nextSplitAt = 0;
+  var t0 = 0;
 
   function rand(min, max) { return min + Math.random() * (max - min); }
 
   function resize() {
-    var rect = hero.getBoundingClientRect();
+    var rect = wrap.getBoundingClientRect();
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     width = Math.max(1, rect.width);
     height = Math.max(1, rect.height);
+    scale = width / VB;
     canvas.width = Math.floor(width * dpr);
     canvas.height = Math.floor(height * dpr);
     canvas.style.width = width + 'px';
     canvas.style.height = height + 'px';
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.setTransform(dpr * scale, 0, 0, dpr * scale, 0, 0);
   }
 
-  function makeNodes() {
-    var count = Math.min(60, Math.max(30, Math.round((width * height) / 26000)));
-    nodes = [];
-    for (var i = 0; i < count; i++) {
-      nodes.push({
-        x: rand(0, width),
-        y: rand(0, height),
-        vx: rand(-0.06, 0.06),
-        vy: rand(-0.05, 0.05)
-      });
-    }
-  }
-
-  function nearestNode(origin) {
-    var best = null, bestD = Infinity;
-    for (var i = 0; i < nodes.length; i++) {
-      var n = nodes[i];
-      var d = Math.hypot(n.x - origin.x, n.y - origin.y);
-      if (d > 0.001 && d < bestD) { bestD = d; best = n; }
-    }
-    return { node: best, dist: bestD === Infinity ? 0 : bestD };
-  }
-
-  function buildPath() {
-    if (nodes.length < 4) { return []; }
-    var used = [];
-    var current = nodes[Math.floor(Math.random() * nodes.length)];
-    used.push(current);
-    for (var i = 0; i < 3; i++) {
-      var best = null, bestD = Infinity;
-      for (var j = 0; j < nodes.length; j++) {
-        var n = nodes[j];
-        if (used.indexOf(n) !== -1) { continue; }
-        var d = Math.hypot(n.x - current.x, n.y - current.y);
-        if (d < bestD) { bestD = d; best = n; }
-      }
-      if (!best) { break; }
-      used.push(best);
-      current = best;
-    }
-    return used;
-  }
-
-  function drawLinks() {
-    ctx.lineWidth = 1;
-    for (var i = 0; i < nodes.length; i++) {
-      for (var j = i + 1; j < nodes.length; j++) {
-        var a = nodes[i], b = nodes[j];
-        var d = Math.hypot(a.x - b.x, a.y - b.y);
-        if (d < LINK_DIST) {
-          var alpha = (1 - d / LINK_DIST) * 0.35;
-          ctx.strokeStyle = COLOR_LINE + alpha + ')';
-          ctx.beginPath();
-          ctx.moveTo(a.x, a.y);
-          ctx.lineTo(b.x, b.y);
-          ctx.stroke();
-        }
-      }
-    }
-  }
-
-  function triggerBeacon(now) {
-    var origin = nodes[Math.floor(Math.random() * nodes.length)];
-    var nearest = nearestNode(origin);
-    var maxR = Math.max(width, height) * 0.55;
-    beacon = {
-      origin: { x: origin.x, y: origin.y },
-      start: now,
-      duration: 1800,
-      maxR: maxR,
-      labelNode: nearest.node,
-      label: Math.max(6, Math.round(nearest.dist / 4)) + 'ms'
-    };
-  }
-
-  function triggerSplit(now) {
-    var path = buildPath();
-    if (path.length < 3) { return; }
-    split = {
-      path: path,
-      start: now,
-      duration: 3200,
-      identityHop: path.length - 2
-    };
+  function drawBead(link, t) {
+    var fadeIn = Math.min(1, t / 0.15);
+    var fadeOut = 1 - t;
+    var alpha = Math.max(0, fadeIn * fadeOut) * 0.85;
+    if (alpha <= 0.01) { return; }
+    var x = link.x1 + (link.x2 - link.x1) * t;
+    var y = link.y1 + (link.y2 - link.y1) * t;
+    var c = link.color;
+    ctx.beginPath();
+    ctx.fillStyle = 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + alpha + ')';
+    ctx.arc(x, y, 3.4, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   function drawBeacon(now) {
-    if (!beacon) { return null; }
-    var t = (now - beacon.start) / beacon.duration;
-    if (t >= 1) { beacon = null; return null; }
+    if (beaconStart === null) { return; }
+    var duration = 1700;
+    var t = (now - beaconStart) / duration;
+    if (t >= 1) { beaconStart = null; return; }
+    var radius = VOID_R + t * (230 - VOID_R);
+    var alpha = 0.28 * (1 - t);
+    ctx.beginPath();
+    ctx.strokeStyle = 'rgba(70, 230, 196, ' + alpha + ')';
+    ctx.lineWidth = 1.4;
+    ctx.arc(CX, CY, radius, 0, Math.PI * 2);
+    ctx.stroke();
+  }
 
-    var radius = t * beacon.maxR;
-    var ringWidth = 90;
-    var lit = {};
-    for (var k = 0; k < nodes.length; k++) {
-      var n = nodes[k];
-      var dist = Math.hypot(n.x - beacon.origin.x, n.y - beacon.origin.y);
-      if (dist <= radius && dist >= radius - ringWidth) {
-        var closeness = 1 - Math.min(dist / beacon.maxR, 1);
-        lit[k] = closeness * (1 - t);
+  function frame(now) {
+    ctx.clearRect(0, 0, VB, VB);
+    var elapsed = now - t0;
+    for (var i = 0; i < LINKS.length; i++) {
+      var link = LINKS[i];
+      for (var p = 0; p < BEAD_PHASES.length; p++) {
+        var period = 2600 + i * 130;
+        var t = ((elapsed / period) + BEAD_PHASES[p] + i * 0.11) % 1;
+        drawBead(link, t);
       }
     }
-    ctx.beginPath();
-    ctx.strokeStyle = COLOR_SIGNAL + (0.25 * (1 - t)) + ')';
-    ctx.lineWidth = 1.5;
-    ctx.arc(beacon.origin.x, beacon.origin.y, Math.max(radius, 0), 0, Math.PI * 2);
-    ctx.stroke();
-    return lit;
-  }
+    drawBeacon(now);
 
-  function drawSplit(now) {
-    if (!split) { return; }
-    var t = (now - split.start) / split.duration;
-    if (t >= 1) { split = null; return; }
-
-    var path = split.path;
-    ctx.strokeStyle = COLOR_INK + '0.16)';
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (var i = 0; i < path.length - 1; i++) {
-      ctx.moveTo(path[i].x, path[i].y);
-      ctx.lineTo(path[i + 1].x, path[i + 1].y);
-    }
-    ctx.stroke();
-
-    for (var i2 = 0; i2 < path.length; i2++) {
-      ctx.beginPath();
-      ctx.fillStyle = COLOR_INK + '0.45)';
-      ctx.arc(path[i2].x, path[i2].y, 2, 0, Math.PI * 2);
-      ctx.fill();
+    if (now >= nextBeaconAt && beaconStart === null) {
+      beaconStart = now;
+      nextBeaconAt = now + rand(4200, 6200);
     }
 
-    var travel = Math.min(t * 1.15, 1);
-    var segCount = path.length - 1;
-    var segF = travel * segCount;
-    var segIdx = Math.min(Math.floor(segF), segCount - 1);
-    var segT = segF - segIdx;
-    var a = path[segIdx], b = path[segIdx + 1];
-    var px = a.x + (b.x - a.x) * segT;
-    var py = a.y + (b.y - a.y) * segT;
-
-    ctx.beginPath();
-    ctx.fillStyle = COLOR_SIGNAL + '0.28)';
-    ctx.arc(px, py, 8, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.fillStyle = COLOR_SIGNAL + '0.9)';
-    ctx.arc(px, py, 4, 0, Math.PI * 2);
-    ctx.fill();
-
-    var idHopIdx = Math.min(split.identityHop, path.length - 2);
-    if (idHopIdx !== segIdx) {
-      var ia = path[idHopIdx], ib = path[idHopIdx + 1];
-      var imx = (ia.x + ib.x) / 2;
-      var imy = (ia.y + ib.y) / 2;
-      var pulse = 0.5 + 0.5 * Math.sin(t * Math.PI * 6);
-      ctx.beginPath();
-      ctx.fillStyle = COLOR_IDENTITY + (0.5 + pulse * 0.4) + ')';
-      ctx.arc(imx, imy, 3.5, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  function drawNodes(lit) {
-    for (var m = 0; m < nodes.length; m++) {
-      var node = nodes[m];
-      var brightness = lit ? lit[m] : undefined;
-      var radius = 1.6;
-      if (brightness) {
-        radius = 1.6 + brightness * 2.2;
-        ctx.beginPath();
-        ctx.fillStyle = COLOR_SIGNAL + (0.35 + brightness * 0.5) + ')';
-        ctx.arc(node.x, node.y, radius + 2, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      ctx.beginPath();
-      ctx.fillStyle = brightness ? '#46E6C4' : COLOR_NODE;
-      ctx.arc(node.x, node.y, radius, 0, Math.PI * 2);
-      ctx.fill();
-    }
-  }
-
-  function step(now) {
-    for (var i = 0; i < nodes.length; i++) {
-      var n = nodes[i];
-      n.x += n.vx;
-      n.y += n.vy;
-      if (n.x < 0 || n.x > width) { n.vx *= -1; }
-      if (n.y < 0 || n.y > height) { n.vy *= -1; }
-      n.x = Math.max(0, Math.min(width, n.x));
-      n.y = Math.max(0, Math.min(height, n.y));
-    }
-
-    ctx.clearRect(0, 0, width, height);
-    drawLinks();
-    var lit = drawBeacon(now);
-    drawNodes(lit);
-
-    if (beacon && beacon.labelNode) {
-      ctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
-      ctx.fillStyle = COLOR_SIGNAL + '0.9)';
-      ctx.fillText(beacon.label, beacon.labelNode.x + 8, beacon.labelNode.y - 8);
-    }
-
-    drawSplit(now);
-
-    if (now >= nextBeaconAt && !beacon) {
-      triggerBeacon(now);
-      nextBeaconAt = now + rand(3400, 5200);
-    }
-    if (now >= nextSplitAt && !split) {
-      triggerSplit(now);
-      nextSplitAt = now + rand(7000, 11000);
-    }
-
-    rafId = requestAnimationFrame(step);
+    rafId = requestAnimationFrame(frame);
   }
 
   function drawStatic() {
-    ctx.clearRect(0, 0, width, height);
-    drawLinks();
-    drawNodes(null);
-
-    if (nodes.length) {
-      var origin = nodes[0];
-      var nearest = nearestNode(origin);
-      if (nearest.node) {
-        ctx.beginPath();
-        ctx.fillStyle = COLOR_SIGNAL + '0.55)';
-        ctx.arc(nearest.node.x, nearest.node.y, 3.4, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.font = '11px ui-monospace, Menlo, Consolas, monospace';
-        ctx.fillStyle = COLOR_SIGNAL + '0.9)';
-        ctx.fillText(Math.max(6, Math.round(nearest.dist / 4)) + 'ms', nearest.node.x + 8, nearest.node.y - 8);
-      }
-    }
-
-    var path = buildPath();
-    if (path.length >= 3) {
-      split = { path: path, start: 0, duration: 1, identityHop: path.length - 2 };
-      drawSplit(0.55);
-      split = null;
+    ctx.clearRect(0, 0, VB, VB);
+    for (var i = 0; i < LINKS.length; i++) {
+      drawBead(LINKS[i], 0.45);
     }
   }
 
   function start() {
     if (rafId === null) {
-      rafId = requestAnimationFrame(step);
+      rafId = requestAnimationFrame(frame);
     }
   }
 
@@ -1050,11 +1076,9 @@
   }
 
   resize();
-  makeNodes();
 
   window.addEventListener('resize', function () {
     resize();
-    makeNodes();
     if (reduceMotionQuery.matches) {
       drawStatic();
     }
@@ -1063,9 +1087,8 @@
   if (reduceMotionQuery.matches) {
     drawStatic();
   } else {
-    var t0 = performance.now();
-    nextBeaconAt = t0 + rand(1200, 2400);
-    nextSplitAt = t0 + rand(4000, 6000);
+    t0 = performance.now();
+    nextBeaconAt = t0 + rand(1000, 2400);
     start();
   }
 
@@ -1076,7 +1099,6 @@
     } else {
       var now = performance.now();
       nextBeaconAt = now + rand(600, 1600);
-      nextSplitAt = now + rand(2000, 4000);
       start();
     }
   });
@@ -1087,9 +1109,8 @@
         stop();
         drawStatic();
       } else {
-        var now = performance.now();
-        nextBeaconAt = now + rand(1200, 2400);
-        nextSplitAt = now + rand(4000, 6000);
+        t0 = performance.now();
+        nextBeaconAt = t0 + rand(1000, 2400);
         start();
       }
     });

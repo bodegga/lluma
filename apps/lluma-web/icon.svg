@@ -1,0 +1,43 @@
+<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Lluma — hosts communicating through an anonymous void">
+  <defs>
+    <radialGradient id="llumaVoid" cx="50%" cy="46%" r="55%">
+      <stop offset="0%" stop-color="#1B2238"/>
+      <stop offset="62%" stop-color="#0A0D18"/>
+      <stop offset="100%" stop-color="#05060B"/>
+    </radialGradient>
+    <radialGradient id="llumaGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#46E6C4" stop-opacity="0.30"/>
+      <stop offset="60%" stop-color="#46E6C4" stop-opacity="0.06"/>
+      <stop offset="100%" stop-color="#46E6C4" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ambient signal glow -->
+  <circle cx="32" cy="32" r="31" fill="url(#llumaGlow)"/>
+
+  <!-- severed links: each host reaches toward the void but its path dissolves before crossing.
+       No two hosts are ever connected through the void — that gap is the anonymity. -->
+  <g fill="none" stroke-linecap="round" stroke-dasharray="0.5 3.5" opacity="0.9">
+    <path d="M32 9 L32 17"   stroke="#46E6C4" stroke-width="2"/>
+    <path d="M53 20 L45 25"  stroke="#5A6488" stroke-width="1.6"/>
+    <path d="M52 46 L44 41"  stroke="#5A6488" stroke-width="1.6"/>
+    <path d="M12 45 L20 40"  stroke="#FF9E64" stroke-width="2"/>
+    <path d="M12 21 L20 25"  stroke="#5A6488" stroke-width="1.6"/>
+  </g>
+
+  <!-- the anonymous void -->
+  <circle cx="32" cy="32" r="12.5" fill="url(#llumaVoid)" stroke="#2A3350" stroke-width="1"/>
+  <circle cx="32" cy="32" r="12.5" fill="none" stroke="#46E6C4" stroke-width="0.75" opacity="0.28"/>
+
+  <!-- host nodes around the void -->
+  <!-- content host (aqua) -->
+  <circle cx="32" cy="9"  r="3.6" fill="#06070D" stroke="#46E6C4" stroke-width="2"/>
+  <circle cx="32" cy="9"  r="1.3" fill="#46E6C4"/>
+  <!-- identity host (amber), across the void from content, never linked to it -->
+  <circle cx="12" cy="45" r="3.6" fill="#06070D" stroke="#FF9E64" stroke-width="2"/>
+  <circle cx="12" cy="45" r="1.3" fill="#FF9E64"/>
+  <!-- neutral hosts -->
+  <circle cx="53" cy="20" r="3.1" fill="#0A0D18" stroke="#8C95B2" stroke-width="1.7"/>
+  <circle cx="52" cy="46" r="3.1" fill="#0A0D18" stroke="#8C95B2" stroke-width="1.7"/>
+  <circle cx="12" cy="21" r="3.1" fill="#0A0D18" stroke="#8C95B2" stroke-width="1.7"/>
+</svg>
