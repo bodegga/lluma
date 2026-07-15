@@ -6,8 +6,6 @@ license.workspace = true
 
 [dependencies]
 lluma-core = { path = "../lluma-core" }
-serde = { workspace = true }
-thiserror = { workspace = true }
 sysinfo = { workspace = true }
 llama-cpp-2 = "0.1"
 encoding_rs = "0.8"

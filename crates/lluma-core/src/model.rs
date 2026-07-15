@@ -2,8 +2,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Quant {
+    #[serde(rename = "Q4_K_M")]
     Q4KM,
+    #[serde(rename = "Q5_K_M")]
     Q5KM,
+    #[serde(rename = "Q8_0")]
     Q8,
     F16,
 }
@@ -49,6 +52,16 @@ mod tests {
     fn quant_display_matches_gguf_naming() {
         assert_eq!(Quant::Q4KM.to_string(), "Q4_K_M");
         assert_eq!(Quant::F16.to_string(), "F16");
+    }
+
+    #[test]
+    fn quant_serde_matches_display() {
+        for q in [Quant::Q4KM, Quant::Q5KM, Quant::Q8, Quant::F16] {
+            let json = serde_json::to_string(&q).unwrap();
+            assert_eq!(json, format!("\"{}\"", q));
+            let back: Quant = serde_json::from_str(&json).unwrap();
+            assert_eq!(back, q);
+        }
     }
 
     #[test]

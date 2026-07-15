@@ -93,7 +93,7 @@ impl ModelRunner for LlamaRunner {
         for n_cur in (tokens.len() as i32..).take(req.max_tokens) {
             let next = sampler.sample(&ctx, batch.n_tokens() - 1);
             sampler.accept(next);
-            if next == self.model.token_eos() {
+            if self.model.is_eog_token(next) {
                 break;
             }
             // NOTE: brief called `token_to_piece(next, &mut decoder, false)` (3 args), but

@@ -17,9 +17,10 @@ tokens make request entitlement unlinkable to identity.
 
 ## Status
 
-Phase 0 (Dogfood): a point-and-click desktop app that auto-detects your hardware,
-recommends and downloads a GGUF model, and runs a local streaming chat.
-The anonymous network (relay + broker + credits) arrives in Phase 1.
+Phase 0 (Dogfood): a point-and-click desktop app that auto-detects your hardware and
+recommends a model to host, with a streaming chat UI. The BLAKE3-verified model download
+and the llama.cpp GGUF runner are implemented as library crates and land in the app in the
+next phase, alongside the anonymous network (relay + broker + credits).
 
 ## Roadmap
 
