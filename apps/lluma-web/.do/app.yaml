@@ -1,0 +1,22 @@
+# DigitalOcean App Platform — static site spec for the Lluma marketing site.
+# Deploy with:  doctl apps create --spec apps/lluma-web/.do/app.yaml
+# Update with:  doctl apps update <APP_ID> --spec apps/lluma-web/.do/app.yaml
+#
+# Fill in `repo` with your GitHub repo once you push (App Platform deploys from Git).
+# The site is a single self-contained index.html — no build step.
+name: lluma-web
+region: nyc
+static_sites:
+  - name: site
+    github:
+      repo: REPLACE_ME/lluma        # e.g. bodegga/lluma
+      branch: main
+      deploy_on_push: true
+    source_dir: apps/lluma-web
+    # No build command: the folder is served as-is.
+    output_dir: /
+    index_document: index.html
+    catchall_document: index.html   # SPA-style fallback (harmless for a single page)
+    error_document: index.html
+    routes:
+      - path: /
