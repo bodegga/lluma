@@ -212,7 +212,9 @@ mod tests {
         let a = e2e_seal(&mut rng, &hpk, b"", b"p", &spk).unwrap();
         let b = e2e_seal(&mut rng, &hpk, b"", b"p", &spk).unwrap();
         assert_ne!(a, b, "fresh HPKE ephemeral per seal");
-        assert!(!a.0.windows(1).any(|_| false)); // ciphertext present
+        // enc (32B) + reply_to (32B) + tag (16B) at minimum, so a real seal is
+        // well over 32 bytes: proves ciphertext (not just enc) is present.
+        assert!(a.0.len() > 32, "sealed request carries ciphertext, not just enc");
     }
 
     #[test]
@@ -226,10 +228,8 @@ mod tests {
     #[test]
     fn response_stream_single_chunk_round_trip() {
         let mut rng = OsRng;
-        let (_ssk, spk) = session_keygen(&mut rng).unwrap();
-        let (ssk, spk2) = session_keygen(&mut rng).unwrap();
-        let _ = spk;
-        let (mut hctx, preamble) = response_setup_host(&mut rng, &spk2).unwrap();
+        let (ssk, spk) = session_keygen(&mut rng).unwrap();
+        let (mut hctx, preamble) = response_setup_host(&mut rng, &spk).unwrap();
         let sealed = response_seal_chunk(&mut hctx, b"hello world", true).unwrap();
         let mut cctx = response_setup_client(&ssk, &preamble).unwrap();
         let (pt, is_final) = response_open_chunk(&mut cctx, &sealed).unwrap();
@@ -248,6 +248,28 @@ mod tests {
         let mut cctx = response_setup_client(&ssk, &preamble).unwrap();
         let (_pt, is_final) = response_open_chunk(&mut cctx, &sealed).unwrap();
         assert!(!is_final, "non-final chunk must report is_final=false");
+    }
+
+    #[test]
+    fn forged_final_flag_fails_closed() {
+        // The finality flag is prepended in cleartext but ALSO bound as AEAD
+        // aad. Flipping it (0 -> 1) to forge "this is the last chunk" on a
+        // truncated stream changes the open-time aad, so the tag check fails.
+        // It must return Err(ChunkOrder), NEVER a spurious Ok((_, true)).
+        let mut rng = OsRng;
+        let (ssk, spk) = session_keygen(&mut rng).unwrap();
+        let (mut hctx, preamble) = response_setup_host(&mut rng, &spk).unwrap();
+        let mut sealed = response_seal_chunk(&mut hctx, b"partial", false).unwrap();
+        assert_eq!(sealed[0], 0, "sealed non-final chunk starts with a 0 flag");
+        sealed[0] = 1; // forge the finality flag
+        let mut cctx = response_setup_client(&ssk, &preamble).unwrap();
+        assert!(
+            matches!(
+                response_open_chunk(&mut cctx, &sealed),
+                Err(CryptoError::ChunkOrder)
+            ),
+            "a forged finality flag must be rejected, never read as complete"
+        );
     }
 }
 
