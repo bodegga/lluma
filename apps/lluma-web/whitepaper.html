@@ -18,6 +18,8 @@
 .note.red{border-left-color:var(--red)}
 .note b{letter-spacing:.01em}
 .figlabel{font-size:9px;letter-spacing:1px;fill:var(--dim)}
+figure.fig{background-image:none!important}  /* text-dense diagrams: drop stipple, keep hairline frame + reg marks */
+.fig svg text{paint-order:stroke;stroke:var(--paper);stroke-width:2.2px;stroke-linejoin:round}
 .fsignode{font-size:11px;letter-spacing:1px}
 section h3{font-size:.82rem;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin:2rem 0 .6rem}
 .reflist{font-size:.8rem;line-height:1.7;max-width:88ch;padding-left:2ch}
