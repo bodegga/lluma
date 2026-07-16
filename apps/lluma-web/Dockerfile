@@ -3,6 +3,5 @@
 #   docker build -t lluma-web apps/lluma-web
 #   docker run -p 8080:80 lluma-web
 FROM nginx:1.27-alpine
-COPY index.html /usr/share/nginx/html/index.html
-# Long cache for assets is moot (single file); keep it simple.
+COPY index.html whitepaper.html lluma.css icon.svg /usr/share/nginx/html/
 EXPOSE 80

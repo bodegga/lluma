@@ -1,0 +1,456 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLUMA — Technical Whitepaper</title>
+<meta name="description" content="How LLUMA keeps who-you-are apart from what-you-asked: threat model, request lifecycle, cryptographic constructions, and honest residual-risk register for anonymous LLM inference.">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9Ii0xMS4yIC04LjAgMTAyLjQgMTIwLjAiPjxkZWZzPjxjbGlwUGF0aCBpZD0iZSI+PHBhdGggZD0iTTM5LjksOS4zQzQ0LjIsOS4zIDQ5LjksMTIuNCA1My4wLDEzLjlDNTYuMSwxNS41IDU2LjgsMTYuOSA1OC40LDE4LjVDNjAuMCwyMC4wIDYxLjIsMjEuNiA2Mi40LDIzLjFDNjMuNiwyNC42IDY0LjYsMjYuMSA2NS42LDI3LjZDNjYuNSwyOS4yIDY3LjQsMzAuOCA2OC4yLDMyLjNDNjkuMCwzMy44IDY5LjcsMzUuMyA3MC4zLDM2LjhDNzEuMCwzOC4zIDcxLjcsMzkuOSA3Mi4zLDQxLjVDNzIuOCw0My4wIDczLjMsNDQuNiA3My44LDQ2LjFDNzQuMiw0Ny42IDc0LjYsNDkuMSA3NC45LDUwLjZDNzUuMyw1Mi4yIDc1LjYsNTMuOCA3NS44LDU1LjNDNzYuMSw1Ni44IDc2LjIsNTguMyA3Ni4zLDU5LjhDNzYuNCw2MS4zIDc2LjQsNjIuOSA3Ni4zLDY0LjVDNzYuMiw2Ni4wIDc2LjAsNjcuNiA3NS43LDY5LjFDNzUuNCw3MC42IDc0LjksNzIuMSA3NC40LDczLjZDNzMuOCw3NS4yIDczLjEsNzYuOCA3Mi4zLDc4LjNDNzEuNCw3OS44IDcwLjUsODEuMyA2OS4zLDgyLjhDNjguMSw4NC4zIDY2LjcsODUuOSA2NS4wLDg3LjVDNjMuMiw4OS4wIDYyLjksOTAuNSA1OC43LDkyLjBDNTQuNSw5My41IDQ1LjksOTYuNiAzOS43LDk2LjZDMzMuNSw5Ni42IDI1LjQsOTMuNSAyMS4zLDkyLjBDMTcuMiw5MC41IDE2LjgsODkuMCAxNS4wLDg3LjVDMTMuMyw4NS45IDExLjksODQuMyAxMC43LDgyLjhDOS41LDgxLjMgOC42LDc5LjggNy43LDc4LjNDNi45LDc2LjggNi4yLDc1LjIgNS42LDczLjZDNS4xLDcyLjEgNC44LDcwLjYgNC41LDY5LjFDNC4yLDY3LjYgNC4wLDY2LjAgMy45LDY0LjVDMy43LDYyLjkgMy43LDYxLjMgMy43LDU5LjhDMy44LDU4LjMgMy45LDU2LjggNC4yLDU1LjNDNC40LDUzLjggNC43LDUyLjIgNS4xLDUwLjZDNS40LDQ5LjEgNS44LDQ3LjYgNi4yLDQ2LjFDNi43LDQ0LjYgNy4yLDQzLjAgNy43LDQxLjVDOC4zLDM5LjkgOS4wLDM4LjMgOS43LDM2LjhDMTAuMywzNS4zIDExLjAsMzMuOCAxMS44LDMyLjNDMTIuNiwzMC44IDEzLjUsMjkuMiAxNC40LDI3LjZDMTUuNCwyNi4xIDE2LjQsMjQuNiAxNy42LDIzLjFDMTguOCwyMS42IDIwLjEsMjAuMCAyMS42LDE4LjVDMjMuMSwxNi45IDIzLjgsMTUuNSAyNi44LDEzLjlDMjkuOSwxMi40IDM1LjUsOS4zIDM5LjksOS4zWiIvPjwvY2xpcFBhdGg+PC9kZWZzPjxwYXRoIGQ9Ik0zOS44LDAuMEM0NS4wLDAuMCA1MS44LDMuNyA1NS41LDUuNUM1OS4yLDcuNCA2MC4wLDkuMSA2MS45LDEwLjlDNjMuOCwxMi43IDY1LjMsMTQuNiA2Ni43LDE2LjVDNjguMSwxOC4zIDY5LjMsMjAuMCA3MC40LDIxLjhDNzEuNiwyMy43IDcyLjcsMjUuNiA3My42LDI3LjRDNzQuNiwyOS4yIDc1LjMsMzAuOSA3Ni4xLDMyLjhDNzYuOSwzNC42IDc3LjcsMzYuNSA3OC40LDM4LjNDNzkuMSw0MC4yIDc5LjcsNDIuMCA4MC4yLDQzLjhDODAuNyw0NS43IDgxLjIsNDcuNCA4MS42LDQ5LjJDODIuMCw1MS4wIDgyLjQsNTMuMCA4Mi43LDU0LjhDODIuOSw1Ni42IDgzLjEsNTguMyA4My4yLDYwLjJDODMuMyw2Mi4wIDgzLjMsNjMuOCA4My4yLDY1LjdDODMuMSw2Ny41IDgyLjksNjkuNCA4Mi41LDcxLjJDODIuMSw3My4xIDgxLjYsNzQuOCA4MC45LDc2LjZDODAuMiw3OC40IDc5LjQsODAuMyA3OC40LDgyLjJDNzcuNCw4NC4wIDc2LjMsODUuNyA3NC45LDg3LjVDNzMuNCw4OS40IDcxLjgsOTEuMyA2OS43LDkzLjFDNjcuNiw5NC45IDY3LjMsOTYuNiA2Mi4zLDk4LjVDNTcuMywxMDAuMyA0Ny4xLDEwNC4wIDM5LjYsMTA0LjBDMzIuMiwxMDQuMCAyMi42LDEwMC4zIDE3LjcsOTguNUMxMi44LDk2LjYgMTIuNCw5NC45IDEwLjMsOTMuMUM4LjIsOTEuMyA2LjYsODkuNCA1LjEsODcuNUMzLjcsODUuNyAyLjYsODQuMCAxLjYsODIuMkMwLjYsODAuMyAtMC4yLDc4LjQgLTAuOSw3Ni42Qy0xLjUsNzQuOCAtMi4wLDczLjEgLTIuMyw3MS4yQy0yLjcsNjkuNCAtMi45LDY3LjUgLTMuMCw2NS43Qy0zLjIsNjMuOCAtMy4zLDYyLjAgLTMuMiw2MC4yQy0zLjEsNTguMyAtMi45LDU2LjYgLTIuNyw1NC44Qy0yLjQsNTMuMCAtMi4wLDUxLjAgLTEuNiw0OS4yQy0xLjIsNDcuNCAtMC43LDQ1LjcgLTAuMiw0My44QzAuMyw0Mi4wIDAuOSw0MC4yIDEuNiwzOC4zQzIuMywzNi41IDMuMSwzNC42IDMuOSwzMi44QzQuNywzMC45IDUuNCwyOS4yIDYuNCwyNy40QzcuMywyNS42IDguNCwyMy43IDkuNiwyMS44QzEwLjcsMjAuMCAxMS45LDE4LjMgMTMuMywxNi41QzE0LjcsMTQuNiAxNi4zLDEyLjcgMTguMSwxMC45QzE5LjksOS4xIDIwLjcsNy40IDI0LjMsNS41QzI3LjksMy43IDM0LjYsMC4wIDM5LjgsMC4wWiIgZmlsbD0iI2ZmZiIgc3Ryb2tlPSIjMEEwQTBBIiBzdHJva2Utd2lkdGg9IjQiLz48cGF0aCBkPSJNMzkuOSw5LjNDNDQuMiw5LjMgNDkuOSwxMi40IDUzLjAsMTMuOUM1Ni4xLDE1LjUgNTYuOCwxNi45IDU4LjQsMTguNUM2MC4wLDIwLjAgNjEuMiwyMS42IDYyLjQsMjMuMUM2My42LDI0LjYgNjQuNiwyNi4xIDY1LjYsMjcuNkM2Ni41LDI5LjIgNjcuNCwzMC44IDY4LjIsMzIuM0M2OS4wLDMzLjggNjkuNywzNS4zIDcwLjMsMzYuOEM3MS4wLDM4LjMgNzEuNywzOS45IDcyLjMsNDEuNUM3Mi44LDQzLjAgNzMuMyw0NC42IDczLjgsNDYuMUM3NC4yLDQ3LjYgNzQuNiw0OS4xIDc0LjksNTAuNkM3NS4zLDUyLjIgNzUuNiw1My44IDc1LjgsNTUuM0M3Ni4xLDU2LjggNzYuMiw1OC4zIDc2LjMsNTkuOEM3Ni40LDYxLjMgNzYuNCw2Mi45IDc2LjMsNjQuNUM3Ni4yLDY2LjAgNzYuMCw2Ny42IDc1LjcsNjkuMUM3NS40LDcwLjYgNzQuOSw3Mi4xIDc0LjQsNzMuNkM3My44LDc1LjIgNzMuMSw3Ni44IDcyLjMsNzguM0M3MS40LDc5LjggNzAuNSw4MS4zIDY5LjMsODIuOEM2OC4xLDg0LjMgNjYuNyw4NS45IDY1LjAsODcuNUM2My4yLDg5LjAgNjIuOSw5MC41IDU4LjcsOTIuMEM1NC41LDkzLjUgNDUuOSw5Ni42IDM5LjcsOTYuNkMzMy41LDk2LjYgMjUuNCw5My41IDIxLjMsOTIuMEMxNy4yLDkwLjUgMTYuOCw4OS4wIDE1LjAsODcuNUMxMy4zLDg1LjkgMTEuOSw4NC4zIDEwLjcsODIuOEM5LjUsODEuMyA4LjYsNzkuOCA3LjcsNzguM0M2LjksNzYuOCA2LjIsNzUuMiA1LjYsNzMuNkM1LjEsNzIuMSA0LjgsNzAuNiA0LjUsNjkuMUM0LjIsNjcuNiA0LjAsNjYuMCAzLjksNjQuNUMzLjcsNjIuOSAzLjcsNjEuMyAzLjcsNTkuOEMzLjgsNTguMyAzLjksNTYuOCA0LjIsNTUuM0M0LjQsNTMuOCA0LjcsNTIuMiA1LjEsNTAuNkM1LjQsNDkuMSA1LjgsNDcuNiA2LjIsNDYuMUM2LjcsNDQuNiA3LjIsNDMuMCA3LjcsNDEuNUM4LjMsMzkuOSA5LjAsMzguMyA5LjcsMzYuOEMxMC4zLDM1LjMgMTEuMCwzMy44IDExLjgsMzIuM0MxMi42LDMwLjggMTMuNSwyOS4yIDE0LjQsMjcuNkMxNS40LDI2LjEgMTYuNCwyNC42IDE3LjYsMjMuMUMxOC44LDIxLjYgMjAuMSwyMC4wIDIxLjYsMTguNUMyMy4xLDE2LjkgMjMuOCwxNS41IDI2LjgsMTMuOUMyOS45LDEyLjQgMzUuNSw5LjMgMzkuOSw5LjNaIiBmaWxsPSJub25lIiBzdHJva2U9IiMwQTBBMEEiIHN0cm9rZS13aWR0aD0iMiIvPjxnIGNsaXAtcGF0aD0idXJsKCNlKSIgc3Ryb2tlPSIjMEEwQTBBIiBzdHJva2Utd2lkdGg9IjMuNCI+PGxpbmUgeDE9Ii0zIiB5MT0iMTYuMyIgeDI9IjgzIiB5Mj0iMTYuMyIvPjxsaW5lIHgxPSItMyIgeTE9IjI3LjMiIHgyPSI4MyIgeTI9IjI3LjMiLz48bGluZSB4MT0iLTMiIHkxPSIzOC4zIiB4Mj0iODMiIHkyPSIzOC4zIi8+PGxpbmUgeDE9Ii0zIiB5MT0iNDkuMyIgeDI9IjgzIiB5Mj0iNDkuMyIvPjxsaW5lIHgxPSItMyIgeTE9IjYwLjMiIHgyPSI4MyIgeTI9IjYwLjMiLz48bGluZSB4MT0iLTMiIHkxPSI3MS4zIiB4Mj0iODMiIHkyPSI3MS4zIi8+PGxpbmUgeDE9Ii0zIiB5MT0iODIuMyIgeDI9IjgzIiB5Mj0iODIuMyIvPjwvZz48L3N2Zz4=">
+<link rel="stylesheet" href="lluma.css">
+<style>
+/* whitepaper-only layout helpers; base system lives in lluma.css */
+.toc{list-style:none;margin:1.6rem 0 0;padding:0;border-top:1px solid var(--ink);max-width:72ch}
+.toc li{display:flex;gap:1ch;padding:.5rem 0;border-bottom:1px dashed var(--ink);font-size:.82rem}
+.toc a{color:var(--ink);text-decoration:none}
+.toc a:hover{color:var(--red);text-decoration:underline}
+.toc .no{color:var(--red);font-weight:600;min-width:5ch}
+.note{border-left:3px solid var(--ink);padding:.9rem 1.2rem;margin:1.6rem 0;background:var(--field);font-size:.86rem;line-height:1.6}
+.note.red{border-left-color:var(--red)}
+.note b{letter-spacing:.01em}
+.figlabel{font-size:9px;letter-spacing:1px;fill:var(--dim)}
+.fsignode{font-size:11px;letter-spacing:1px}
+section h3{font-size:.82rem;text-transform:uppercase;letter-spacing:.1em;font-weight:600;margin:2rem 0 .6rem}
+.reflist{font-size:.8rem;line-height:1.7;max-width:88ch;padding-left:2ch}
+</style>
+</head>
+<body>
+
+<header class="mast">
+  <div class="wrap mast-row">
+    <a class="brand" href="/" aria-label="Reload LLUMA.BODEGGA.NET">
+      <svg class="egg" viewBox="-5.2 -2.0 90.4 108.0" role="img" aria-label="Bodegga egg — a shell drawn in horizontal lines"><defs><clipPath id="eggclip"><path d="M39.9,9.3C44.2,9.3 49.9,12.4 53.0,13.9C56.1,15.5 56.8,16.9 58.4,18.5C60.0,20.0 61.2,21.6 62.4,23.1C63.6,24.6 64.6,26.1 65.6,27.6C66.5,29.2 67.4,30.8 68.2,32.3C69.0,33.8 69.7,35.3 70.3,36.8C71.0,38.3 71.7,39.9 72.3,41.5C72.8,43.0 73.3,44.6 73.8,46.1C74.2,47.6 74.6,49.1 74.9,50.6C75.3,52.2 75.6,53.8 75.8,55.3C76.1,56.8 76.2,58.3 76.3,59.8C76.4,61.3 76.4,62.9 76.3,64.5C76.2,66.0 76.0,67.6 75.7,69.1C75.4,70.6 74.9,72.1 74.4,73.6C73.8,75.2 73.1,76.8 72.3,78.3C71.4,79.8 70.5,81.3 69.3,82.8C68.1,84.3 66.7,85.9 65.0,87.5C63.2,89.0 62.9,90.5 58.7,92.0C54.5,93.5 45.9,96.6 39.7,96.6C33.5,96.6 25.4,93.5 21.3,92.0C17.2,90.5 16.8,89.0 15.0,87.5C13.3,85.9 11.9,84.3 10.7,82.8C9.5,81.3 8.6,79.8 7.7,78.3C6.9,76.8 6.2,75.2 5.6,73.6C5.1,72.1 4.8,70.6 4.5,69.1C4.2,67.6 4.0,66.0 3.9,64.5C3.7,62.9 3.7,61.3 3.7,59.8C3.8,58.3 3.9,56.8 4.2,55.3C4.4,53.8 4.7,52.2 5.1,50.6C5.4,49.1 5.8,47.6 6.2,46.1C6.7,44.6 7.2,43.0 7.7,41.5C8.3,39.9 9.0,38.3 9.7,36.8C10.3,35.3 11.0,33.8 11.8,32.3C12.6,30.8 13.5,29.2 14.4,27.6C15.4,26.1 16.4,24.6 17.6,23.1C18.8,21.6 20.1,20.0 21.6,18.5C23.1,16.9 23.8,15.5 26.8,13.9C29.9,12.4 35.5,9.3 39.9,9.3Z"/></clipPath></defs><path d="M39.8,0.0C45.0,0.0 51.8,3.7 55.5,5.5C59.2,7.4 60.0,9.1 61.9,10.9C63.8,12.7 65.3,14.6 66.7,16.5C68.1,18.3 69.3,20.0 70.4,21.8C71.6,23.7 72.7,25.6 73.6,27.4C74.6,29.2 75.3,30.9 76.1,32.8C76.9,34.6 77.7,36.5 78.4,38.3C79.1,40.2 79.7,42.0 80.2,43.8C80.7,45.7 81.2,47.4 81.6,49.2C82.0,51.0 82.4,53.0 82.7,54.8C82.9,56.6 83.1,58.3 83.2,60.2C83.3,62.0 83.3,63.8 83.2,65.7C83.1,67.5 82.9,69.4 82.5,71.2C82.1,73.1 81.6,74.8 80.9,76.6C80.2,78.4 79.4,80.3 78.4,82.2C77.4,84.0 76.3,85.7 74.9,87.5C73.4,89.4 71.8,91.3 69.7,93.1C67.6,94.9 67.3,96.6 62.3,98.5C57.3,100.3 47.1,104.0 39.6,104.0C32.2,104.0 22.6,100.3 17.7,98.5C12.8,96.6 12.4,94.9 10.3,93.1C8.2,91.3 6.6,89.4 5.1,87.5C3.7,85.7 2.6,84.0 1.6,82.2C0.6,80.3 -0.2,78.4 -0.9,76.6C-1.5,74.8 -2.0,73.1 -2.3,71.2C-2.7,69.4 -2.9,67.5 -3.0,65.7C-3.2,63.8 -3.3,62.0 -3.2,60.2C-3.1,58.3 -2.9,56.6 -2.7,54.8C-2.4,53.0 -2.0,51.0 -1.6,49.2C-1.2,47.4 -0.7,45.7 -0.2,43.8C0.3,42.0 0.9,40.2 1.6,38.3C2.3,36.5 3.1,34.6 3.9,32.8C4.7,30.9 5.4,29.2 6.4,27.4C7.3,25.6 8.4,23.7 9.6,21.8C10.7,20.0 11.9,18.3 13.3,16.5C14.7,14.6 16.3,12.7 18.1,10.9C19.9,9.1 20.7,7.4 24.3,5.5C27.9,3.7 34.6,0.0 39.8,0.0Z" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M39.9,9.3C44.2,9.3 49.9,12.4 53.0,13.9C56.1,15.5 56.8,16.9 58.4,18.5C60.0,20.0 61.2,21.6 62.4,23.1C63.6,24.6 64.6,26.1 65.6,27.6C66.5,29.2 67.4,30.8 68.2,32.3C69.0,33.8 69.7,35.3 70.3,36.8C71.0,38.3 71.7,39.9 72.3,41.5C72.8,43.0 73.3,44.6 73.8,46.1C74.2,47.6 74.6,49.1 74.9,50.6C75.3,52.2 75.6,53.8 75.8,55.3C76.1,56.8 76.2,58.3 76.3,59.8C76.4,61.3 76.4,62.9 76.3,64.5C76.2,66.0 76.0,67.6 75.7,69.1C75.4,70.6 74.9,72.1 74.4,73.6C73.8,75.2 73.1,76.8 72.3,78.3C71.4,79.8 70.5,81.3 69.3,82.8C68.1,84.3 66.7,85.9 65.0,87.5C63.2,89.0 62.9,90.5 58.7,92.0C54.5,93.5 45.9,96.6 39.7,96.6C33.5,96.6 25.4,93.5 21.3,92.0C17.2,90.5 16.8,89.0 15.0,87.5C13.3,85.9 11.9,84.3 10.7,82.8C9.5,81.3 8.6,79.8 7.7,78.3C6.9,76.8 6.2,75.2 5.6,73.6C5.1,72.1 4.8,70.6 4.5,69.1C4.2,67.6 4.0,66.0 3.9,64.5C3.7,62.9 3.7,61.3 3.7,59.8C3.8,58.3 3.9,56.8 4.2,55.3C4.4,53.8 4.7,52.2 5.1,50.6C5.4,49.1 5.8,47.6 6.2,46.1C6.7,44.6 7.2,43.0 7.7,41.5C8.3,39.9 9.0,38.3 9.7,36.8C10.3,35.3 11.0,33.8 11.8,32.3C12.6,30.8 13.5,29.2 14.4,27.6C15.4,26.1 16.4,24.6 17.6,23.1C18.8,21.6 20.1,20.0 21.6,18.5C23.1,16.9 23.8,15.5 26.8,13.9C29.9,12.4 35.5,9.3 39.9,9.3Z" fill="none" stroke="currentColor" stroke-width="1.2"/><g clip-path="url(#eggclip)" stroke="currentColor" stroke-width="1.5"><line x1="-3" y1="11.3" x2="83" y2="11.3"/><line x1="-3" y1="16.2" x2="83" y2="16.2"/><line x1="-3" y1="21.1" x2="83" y2="21.1"/><line x1="-3" y1="26.0" x2="83" y2="26.0"/><line x1="-3" y1="30.9" x2="83" y2="30.9"/><line x1="-3" y1="35.8" x2="83" y2="35.8"/><line x1="-3" y1="40.7" x2="83" y2="40.7"/><line x1="-3" y1="45.6" x2="83" y2="45.6"/><line x1="-3" y1="50.5" x2="83" y2="50.5"/><line x1="-3" y1="55.4" x2="83" y2="55.4"/><line x1="-3" y1="60.3" x2="83" y2="60.3"/><line x1="-3" y1="65.2" x2="83" y2="65.2"/><line x1="-3" y1="70.1" x2="83" y2="70.1"/><line x1="-3" y1="75.0" x2="83" y2="75.0"/><line x1="-3" y1="79.9" x2="83" y2="79.9"/><line x1="-3" y1="84.8" x2="83" y2="84.8"/><line x1="-3" y1="89.7" x2="83" y2="89.7"/><line x1="-3" y1="94.6" x2="83" y2="94.6"/></g></svg>
+      <span class="wordmark"><span class="wm-l">LLUMA</span><span class="wm-dot">.</span><span class="wm-b">BODEGGA</span><span class="wm-dot">.</span><span class="wm-n">NET</span></span>
+    </a>
+    <div class="calbar" aria-hidden="true"><span style="background:#0A0A0A"></span><span style="background:#C41E14"></span><span style="background:#E8871E"></span><span style="background:#5C5C57"></span><span style="background:#8A8A85"></span><span style="background:#C9C9C4"></span><span style="background:#F1F1ED"></span></div>
+    <nav class="docnav" aria-label="Document sections">
+      <a href="index.html">← Overview</a>
+      <a href="#s02">§02 Threat model</a>
+      <a href="#s04">§04 Lifecycle</a>
+      <a href="#s06">§06 Unlinkability</a>
+      <a href="#s09">§09 Limitations</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+<div class="wrap">
+
+  <div class="hero">
+    <div class="micro">Technical whitepaper · v0.1 draft · 2026-07</div>
+    <h1>How LLUMA keeps <em>who you are</em> apart from <em>what you asked</em>.</h1>
+    <p class="abstract">
+      LLUMA is a torrent-style network for anonymous language-model inference. Identity
+      and content are split across three mutually distrusting parties — a relay, a
+      broker, and a serving host — and bound with standardized cryptography: RFC 9474
+      RSA blind signatures for unlinkable credit tokens, RFC 9458 Oblivious HTTP for
+      identity-blind transport, and RFC 9180 HPKE for end-to-end prompt confidentiality.
+      This page describes the threat model, request lifecycle, and cryptographic
+      constructions — and states its own residual risks.
+    </p>
+    <div class="note red">
+      <b>Read this first.</b> For the volunteer <b>Open tier</b> described here, the serving
+      host <b>does see your prompt in plaintext</b> — it simply cannot link that prompt to
+      your identity or IP. This is unlinkability, not content-blindness. Host-blindness
+      requires the Confidential (TEE) tier, which is designed but not yet built. The
+      anonymity network is not deployed today (see §10).
+    </div>
+    <ol class="toc">
+      <li><span class="no">§ 01</span><a href="#s01">System model &amp; the privacy invariant</a></li>
+      <li><span class="no">§ 02</span><a href="#s02">Threat model &amp; trust assumptions</a></li>
+      <li><span class="no">§ 03</span><a href="#s03">Architecture &amp; roles</a></li>
+      <li><span class="no">§ 04</span><a href="#s04">Request lifecycle</a></li>
+      <li><span class="no">§ 05</span><a href="#s05">Cryptographic constructions</a></li>
+      <li><span class="no">§ 06</span><a href="#s06">The unlinkability bridge</a></li>
+      <li><span class="no">§ 07</span><a href="#s07">Contribution economy &amp; Sybil resistance</a></li>
+      <li><span class="no">§ 08</span><a href="#s08">Trust tiers</a></li>
+      <li><span class="no">§ 09</span><a href="#s09">Known limitations &amp; residual risks</a></li>
+      <li><span class="no">§ 10</span><a href="#s10">Implementation status &amp; roadmap</a></li>
+    </ol>
+  </div>
+
+  <section id="s01">
+    <div class="register"><h2><span class="no">§ 01</span>System model &amp; the privacy invariant</h2></div>
+    <p class="lede">The whole design serves one sentence: <b>no single participant ever holds
+      both “who you are” and “what you asked.”</b> Identity (your IP, your account) and
+      content (your prompt) are never present together in any one party’s view.</p>
+    <p>Everything is delivered through a point-and-click desktop application — a Rust core
+      with a Tauri UI — with a <b>Contribute</b> side that turns hosting a model into a
+      one-click action, and a <b>Chat</b> side that sends anonymous requests into the network.
+      A request succeeds only when it completes end-to-end with no party holding both the
+      originator’s IP and the prompt plaintext, and when repeated requests stay unlinkable
+      to each other and to the user.</p>
+  </section>
+
+  <section id="s02">
+    <div class="register"><h2><span class="no">§ 02</span>Threat model &amp; trust assumptions</h2></div>
+    <p class="lede">Parties are honest-but-curious individually and may collude pairwise, with
+      one load-bearing exception noted below. The issuer is trusted for credit integrity but
+      <b>not</b> for anonymity — blindness holds even against a malicious issuer.</p>
+    <figure class="fig" id="fig01">
+      <span class="regmark tl" aria-hidden="true">+</span>
+      <span class="regmark tr" aria-hidden="true">+</span>
+      <span class="regmark bl" aria-hidden="true">+</span>
+      <span class="regmark br" aria-hidden="true">+</span>
+      <svg viewBox="0 0 760 260" role="img" aria-label="Figure 1. A request travels Consumer to Relay to Broker to Host. The relay sees the IP but not the prompt; the broker sees routing metadata but neither IP nor prompt; the host sees the prompt but no identity. No party holds both identity and content.">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0A0A0A"/></marker>
+  </defs>
+  <!-- lane boxes -->
+  <g stroke="#0A0A0A" stroke-width="1.4" fill="#FFFFFF">
+    <rect x="20"  y="60" width="140" height="52"/>
+    <rect x="230" y="60" width="140" height="52"/>
+    <rect x="440" y="60" width="140" height="52"/>
+    <rect x="650" y="60" width="90"  height="52"/>
+  </g>
+  <g text-anchor="middle" fill="#0A0A0A" class="fsignode">
+    <text x="90"  y="90">CONSUMER</text>
+    <text x="300" y="90">RELAY</text>
+    <text x="510" y="90">BROKER</text>
+    <text x="695" y="90">HOST</text>
+  </g>
+  <!-- connectors -->
+  <g stroke="#0A0A0A" stroke-width="1.4" marker-end="url(#ar)">
+    <line x1="160" y1="86" x2="226" y2="86"/>
+    <line x1="370" y1="86" x2="436" y2="86"/>
+    <line x1="580" y1="86" x2="646" y2="86"/>
+  </g>
+  <!-- what travels -->
+  <g text-anchor="middle" class="figlabel">
+    <text x="193" y="76">IP + capsule</text>
+    <text x="403" y="76">ciphertext + meta</text>
+    <text x="613" y="76">sealed prompt</text>
+  </g>
+  <!-- SEES row -->
+  <g text-anchor="middle" font-size="9" letter-spacing="1">
+    <text x="90"  y="140" fill="#5C5C57">SEES: everything</text>
+    <text x="90"  y="154" fill="#5C5C57">of its own</text>
+    <text x="300" y="140" fill="#C41E14">SEES: your IP</text>
+    <text x="300" y="154" fill="#5C5C57">never the prompt</text>
+    <text x="510" y="140" fill="#A85A00">SEES: routing meta</text>
+    <text x="510" y="154" fill="#5C5C57">never IP or prompt</text>
+    <text x="695" y="140" fill="#0A0A0A">SEES: the prompt</text>
+    <text x="695" y="154" fill="#5C5C57">never who asked</text>
+  </g>
+  <!-- identity / content bands -->
+  <rect x="20" y="185" width="350" height="18" fill="#C41E14" fill-opacity="0.12" stroke="#C41E14" stroke-width="1"/>
+  <rect x="230" y="215" width="510" height="18" fill="#E8871E" fill-opacity="0.12" stroke="#E8871E" stroke-width="1"/>
+  <g font-size="9" letter-spacing="1">
+    <text x="30"  y="198" fill="#C41E14">IDENTITY visible here — never past the relay</text>
+    <text x="240" y="228" fill="#A85A00">CONTENT sealed here — opens only at the host</text>
+  </g>
+</svg>
+      <figcaption>
+        <span class="micro"><span class="chip">FIG. 01</span>&ensp;Trust boundaries across one request</span>
+        <span class="micro">Identity is visible only at the relay; content opens only at the host. No party sees both.</span>
+      </figcaption>
+    </figure>
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Party</th><th>May see</th><th>Never sees</th></tr></thead>
+        <tbody>
+          <tr><td>RELAY</td><td><span class="warn">originator IP</span>, opaque ciphertext</td><td>prompt · chosen host · account</td></tr>
+          <tr><td>BROKER / ISSUER</td><td><span class="v">routing meta, ledger, blinded requests</span></td><td>IP · prompt · account↔token link</td></tr>
+          <tr><td>HOST</td><td><span class="warn">plaintext prompt</span>, a valid token</td><td><span class="k">IP · account · other requests</span></td></tr>
+        </tbody>
+        <caption class="micro">TABLE 01 — What each party sees. Compromise of any one yields at most half a secret.</caption>
+      </table>
+    </div>
+    <div class="note">
+      <b>The one operational assumption (leak L1).</b> The invariant is void if the relay
+      (which sees IP) and the broker (which sees routing metadata) are run by the same party
+      that logs. Cryptography cannot fix operational co-location. In the single-operator MVP
+      the relay runs on a separate host with no shared logs; independent community relays
+      arrive in Phase 3.
+    </div>
+  </section>
+
+  <section id="s03">
+    <div class="register"><h2><span class="no">§ 03</span>Architecture &amp; roles</h2></div>
+    <p class="lede">LLUMA torrents the model <em>weights</em>, but runs each inference whole-model
+      on a single host. Cross-WAN sharding of one model across peers is out of scope — latency
+      makes it slow and fragile.</p>
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Role</th><th>Function</th><th>Trust</th></tr></thead>
+        <tbody>
+          <tr><td>SEED / HOST</td><td>Holds weights; serves inference and seeds weight files to others.</td><td>content, no identity</td></tr>
+          <tr><td>RELAY</td><td>Oblivious-HTTP relay; hides the originator’s IP from broker and host.</td><td>identity, no content</td></tr>
+          <tr><td>BROKER</td><td>Tracker + matchmaker + credit accounting. Centralized in MVP.</td><td>metadata only</td></tr>
+          <tr><td>ISSUER</td><td>Blind-token station; converts credits into unlinkable tokens.</td><td>blinded material only</td></tr>
+        </tbody>
+        <caption class="micro">TABLE 02 — Roles. The weight-distribution path is separate from the inference path and never carries prompts.</caption>
+      </table>
+    </div>
+  </section>
+
+  <section id="s04">
+    <div class="register"><h2><span class="no">§ 04</span>Request lifecycle</h2></div>
+    <p class="lede">Nested encryption: the prompt is sealed end-to-end to the host <em>inside</em>
+      an Oblivious HTTP capsule to the broker. The relay strips the IP; the broker routes on
+      metadata it can read but cannot open the prompt; only the host decrypts it.</p>
+    <figure class="fig" id="fig02">
+      <span class="regmark tl" aria-hidden="true">+</span>
+      <span class="regmark tr" aria-hidden="true">+</span>
+      <span class="regmark bl" aria-hidden="true">+</span>
+      <span class="regmark br" aria-hidden="true">+</span>
+      <svg viewBox="0 0 760 430" role="img" aria-label="Figure 2. Sequence of one anonymous request. Consumer buys blind tokens from the issuer, seals the prompt to the host inside an OHTTP capsule, sends via relay which strips IP, broker verifies the token with a public key and routes on metadata, host decrypts and infers, response returns sealed to the session key, and the host is credited by a receipt that names no consumer.">
+  <defs>
+    <marker id="sq" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0A0A0A"/></marker>
+    <marker id="sqr" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#C41E14"/></marker>
+  </defs>
+  <!-- lifelines -->
+  <g class="fignode" text-anchor="middle" fill="#0A0A0A">
+    <text x="70"  y="26">CONSUMER</text>
+    <text x="240" y="26">ISSUER</text>
+    <text x="410" y="26">RELAY</text>
+    <text x="560" y="26">BROKER</text>
+    <text x="705" y="26">HOST</text>
+  </g>
+  <g stroke="#0A0A0A" stroke-width="1" stroke-dasharray="2 4">
+    <line x1="70"  y1="36" x2="70"  y2="410"/>
+    <line x1="240" y1="36" x2="240" y2="410"/>
+    <line x1="410" y1="36" x2="410" y2="410"/>
+    <line x1="560" y1="36" x2="560" y2="410"/>
+    <line x1="705" y1="36" x2="705" y2="410"/>
+  </g>
+  <!-- steps -->
+  <g stroke="#0A0A0A" stroke-width="1.3" marker-end="url(#sq)">
+    <line x1="70"  y1="70"  x2="236" y2="70"/>
+    <line x1="240" y1="100" x2="74"  y2="100"/>
+    <line x1="70"  y1="150" x2="406" y2="150"/>
+    <line x1="410" y1="180" x2="556" y2="180"/>
+    <line x1="560" y1="210" x2="701" y2="210"/>
+  </g>
+  <g stroke="#C41E14" stroke-width="1.3" marker-end="url(#sqr)">
+    <line x1="705" y1="270" x2="564" y2="270"/>
+    <line x1="560" y1="300" x2="414" y2="300"/>
+    <line x1="410" y1="330" x2="74"  y2="330"/>
+    <line x1="705" y1="378" x2="564" y2="378"/>
+  </g>
+  <g class="figlabel">
+    <text x="80"  y="64">1 · blinded token requests</text>
+    <text x="80"  y="94" fill="#5C5C57">2 · blind signatures (issuer sees only blobs)</text>
+    <text x="80"  y="144">3 · OHTTP capsule — relay sees IP, not prompt</text>
+    <text x="270" y="174">4 · ciphertext + routing meta (no IP)</text>
+    <text x="420" y="204">5 · verify token (public key), route</text>
+    <text x="470" y="264" fill="#C41E14">6 · response sealed to session key</text>
+    <text x="320" y="294" fill="#C41E14">7 · OHTTP response</text>
+    <text x="80"  y="324" fill="#C41E14">8 · consumer opens both layers</text>
+    <text x="470" y="372" fill="#5C5C57">receipt credits the HOST — names no consumer</text>
+  </g>
+</svg>
+      <figcaption>
+        <span class="micro"><span class="chip">FIG. 02</span>&ensp;One anonymous request, end to end</span>
+        <span class="micro">Black = request path; red = response path. The receipt credits the host and names no consumer.</span>
+      </figcaption>
+    </figure>
+    <ol class="steps">
+      <li><div class="s-body"><b>Buy tokens out of band.</b> The client blinds random nonces and the issuer blind-signs them, debiting the account. The issuer sees only blinded blobs.</div></li>
+      <li><div class="s-body"><b>Seal the prompt.</b> The prompt and a fresh session key are HPKE-sealed to the host, then wrapped in an OHTTP capsule to the broker; one token is attached.</div></li>
+      <li><div class="s-body"><b>Relay strips identity.</b> The relay forwards the capsule and routing metadata to the broker — without the IP it alone saw.</div></li>
+      <li><div class="s-body"><b>Broker verifies and routes.</b> The token is checked with the issuer’s public key; the host is matched by latency, load, and tier. The broker never opens the prompt.</div></li>
+      <li><div class="s-body"><b>Host infers, responds, is credited.</b> The host decrypts, runs inference, and streams a response sealed to the session key. A signed receipt credits the host — never the consumer.</div></li>
+    </ol>
+  </section>
+
+  <section id="s05">
+    <div class="register"><h2><span class="no">§ 05</span>Cryptographic constructions</h2></div>
+    <p class="lede">All primitives are IETF-standardized (or Standards-Track drafts) with maintained,
+      reviewed Rust implementations. No novel crypto.</p>
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Layer</th><th>Construction</th><th>Property relied on</th></tr></thead>
+        <tbody>
+          <tr><td>Credit tokens</td><td><span class="v">RFC 9474 RSA blind sigs</span></td><td>Perfect blinding + public verifiability</td></tr>
+          <tr><td>Transport</td><td><span class="v">RFC 9458 Oblivious HTTP</span></td><td>Relay sees IP; broker sees metadata</td></tr>
+          <tr><td>End-to-end</td><td><span class="v">RFC 9180 HPKE (X25519 / ChaCha20-Poly1305)</span></td><td>Only the host opens the prompt</td></tr>
+          <tr><td>Sessions</td><td>Ephemeral X25519, per request</td><td>Requests unlinkable to each other</td></tr>
+          <tr><td>Identity</td><td>Ed25519 account + BLAKE3 handle</td><td>Contribution-side only; no PII</td></tr>
+          <tr><td>Backup</td><td>BIP-39 seed + Argon2id / XChaCha20-Poly1305</td><td>Self-custodial; no PII recovery</td></tr>
+        </tbody>
+        <caption class="micro">TABLE 03 — Primitive selection. Full rationale and parameters live in ADR-0001.</caption>
+      </table>
+    </div>
+  </section>
+
+  <section id="s06">
+    <div class="register"><h2><span class="no">§ 06</span>The unlinkability bridge</h2></div>
+    <p class="lede">The one place the identified ledger touches anonymous spending is redemption —
+      and it is exactly there that the link is cut.</p>
+    <figure class="fig" id="fig03">
+      <span class="regmark tl" aria-hidden="true">+</span>
+      <span class="regmark tr" aria-hidden="true">+</span>
+      <span class="regmark bl" aria-hidden="true">+</span>
+      <span class="regmark br" aria-hidden="true">+</span>
+      <svg viewBox="0 0 760 250" role="img" aria-label="Figure 3. The unlinkability bridge. An identified account redeems credits at the issuer, sending blinded messages. The issuer blind-signs them. Because RSA blinding is information-theoretically hiding, the link between the account and any later-spent token is cut: no party can trace a spent token back to the account.">
+  <defs>
+    <marker id="br" markerWidth="9" markerHeight="9" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#0A0A0A"/></marker>
+  </defs>
+  <!-- identified side -->
+  <rect x="20" y="70" width="180" height="70" fill="#C41E14" fill-opacity="0.10" stroke="#C41E14" stroke-width="1.4"/>
+  <g text-anchor="middle"><text x="110" y="100" class="fignode" fill="#C41E14">ACCOUNT</text>
+  <text x="110" y="118" class="figlabel">Ed25519 · credit balance</text></g>
+  <text x="110" y="58" text-anchor="middle" font-size="9" letter-spacing="1" fill="#C41E14">IDENTIFIED</text>
+  <!-- gate -->
+  <rect x="300" y="70" width="160" height="70" fill="#FFFFFF" stroke="#0A0A0A" stroke-width="1.4"/>
+  <g text-anchor="middle"><text x="380" y="98" class="fignode" fill="#0A0A0A">BLIND</text>
+  <text x="380" y="116" class="fignode" fill="#0A0A0A">SIGNING</text></g>
+  <text x="380" y="58" text-anchor="middle" font-size="9" letter-spacing="1" fill="#5C5C57">RFC 9474</text>
+  <!-- anonymous side -->
+  <g fill="#FFFFFF" stroke="#0A0A0A" stroke-width="1.4">
+    <rect x="560" y="60" width="180" height="26"/>
+    <rect x="560" y="94" width="180" height="26"/>
+    <rect x="560" y="128" width="180" height="26"/>
+  </g>
+  <g text-anchor="middle" class="figlabel" fill="#0A0A0A">
+    <text x="650" y="78">bearer token</text>
+    <text x="650" y="112">bearer token</text>
+    <text x="650" y="146">bearer token</text>
+  </g>
+  <text x="650" y="48" text-anchor="middle" font-size="9" letter-spacing="1" fill="#0A0A0A">ANONYMOUS</text>
+  <!-- arrows -->
+  <g stroke="#0A0A0A" stroke-width="1.4" marker-end="url(#br)">
+    <line x1="200" y1="105" x2="296" y2="105"/>
+    <line x1="460" y1="105" x2="556" y2="105"/>
+  </g>
+  <text x="248" y="98" text-anchor="middle" class="figlabel">blinded</text>
+  <text x="508" y="98" text-anchor="middle" class="figlabel">signed</text>
+  <!-- the cut: account cannot be linked to a spent token -->
+  <path d="M110,150 C110,205 650,205 650,158" fill="none" stroke="#C41E14" stroke-width="1.2" stroke-dasharray="4 4"/>
+  <g transform="translate(380,196)">
+    <line x1="-12" y1="-12" x2="12" y2="12" stroke="#C41E14" stroke-width="2.2"/>
+    <line x1="12" y1="-12" x2="-12" y2="12" stroke="#C41E14" stroke-width="2.2"/>
+  </g>
+  <text x="380" y="230" text-anchor="middle" font-size="9" letter-spacing="1" fill="#C41E14">LINK SEVERED — no party can trace a spent token to the account</text>
+</svg>
+      <figcaption>
+        <span class="micro"><span class="chip">FIG. 03</span>&ensp;Redemption severs account from spend</span>
+        <span class="micro">RSA blinding is information-theoretically hiding: the issuer transcript fits every possible token set.</span>
+      </figcaption>
+    </figure>
+    <p>The issuer’s entire view of a redemption is the account key, the blinded blobs, and the
+      blind signatures. Because RSA blinding is information-theoretically hiding, that transcript
+      is equally consistent with <b>every</b> possible set of resulting tokens. When a token is
+      later spent, no party — not even the issuer colluding with the broker and hosts — can
+      trace it to the redeeming account. The guarantee is enforced by the <b>shape of the API</b>:
+      verification accepts only an issuer public key and a token, so no function can express
+      “consumer account + spendable token” in one place. Residual linkage is only statistical
+      (timing, counts) — see L2 and L4.</p>
+  </section>
+
+  <section id="s07">
+    <div class="register"><h2><span class="no">§ 07</span>Contribution economy &amp; Sybil resistance</h2></div>
+    <p class="lede">You contribute before you consume, tiered to your hardware. Accounting is
+      anonymous by the same mechanism as spending.</p>
+    <p>Contribution produces signed receipts aggregated into a credit balance, spent by presenting
+      blind tokens — so “who earned” and “who spent” cannot be correlated. Credits are
+      non-transferable and redeemable only for your own inference: no trading, no fiat. Sybil
+      resistance falls out of this — an account is a free keypair, so a fresh account is nearly
+      worthless (a small trial grant only); a <b>credited</b> account requires burning real hosted,
+      seeded, or donated compute. Identity is cheap; credited identity is expensive.</p>
+  </section>
+
+  <section id="s08">
+    <div class="register"><h2><span class="no">§ 08</span>Trust tiers</h2></div>
+    <p class="lede">Two tiers, honestly labeled, chosen per request.</p>
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Tier</th><th>Execution</th><th>Host sees</th><th>Guarantee</th></tr></thead>
+        <tbody>
+          <tr class="aqua"><td><span class="chip">OPEN</span></td><td>Any volunteer host</td><td><span class="warn">plaintext prompt, anonymous origin</span></td><td>Unlinkability — content not traceable to identity</td></tr>
+          <tr class="amber"><td><span class="chip red">CONFIDENTIAL</span></td><td><span class="k">tier:</span> <span class="v">tee</span> — attested enclave</td><td><span class="v">sees: ciphertext</span></td><td>Unlinkability + host-blindness (Phase 4)</td></tr>
+        </tbody>
+        <caption class="micro">TABLE 04 — What each tier promises. In LLUMA, “zero-knowledge” means TEE-attested and operator-blind — never FHE.</caption>
+      </table>
+    </div>
+  </section>
+
+  <section id="s09">
+    <div class="register"><h2><span class="no">§ 09</span>Known limitations &amp; residual risks</h2></div>
+    <p class="lede">A design that names its weaknesses is one you can evaluate. Each row is a place
+      identity↔content could leak, and its mitigation.</p>
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>#</th><th>Risk</th><th>Mitigation</th></tr></thead>
+        <tbody>
+          <tr class="amber"><td>L1</td><td>Relay + broker one operator with logs → invariant void</td><td>Operational separation; community relays (Phase 3)</td></tr>
+          <tr><td>L2</td><td>Issuer key epochs partition the anonymity set</td><td>One global key/epoch, ≥30-day epochs, transparency log</td></tr>
+          <tr><td>L3</td><td>Response-key reuse links requests</td><td>Fresh per-request keypair by API construction</td></tr>
+          <tr><td>L4</td><td>Timing/count correlation of redeem then spend</td><td>Batched pre-fetch, spend buffering, coarse timestamps</td></tr>
+          <tr><td>L5</td><td>PII-based recovery re-identifies the economy</td><td>Forbidden; self-custodial seed phrase only</td></tr>
+          <tr><td>L6</td><td>Variable token denominations partition the set</td><td>Single denomination</td></tr>
+          <tr><td>L7</td><td>Routing metadata as a fingerprint</td><td>Coarse net-coordinates; low-cardinality model-id</td></tr>
+          <tr><td>L8</td><td>Prompt bytes leaking into logs/errors</td><td>No error variant embeds plaintext; enforced by test</td></tr>
+        </tbody>
+        <caption class="micro">TABLE 05 — Residual-risk register. Against a curious host the Open tier protects identity, not content.</caption>
+      </table>
+    </div>
+  </section>
+
+  <section id="s10">
+    <div class="register"><h2><span class="no">§ 10</span>Implementation status &amp; roadmap</h2></div>
+    <p class="lede">This is a design whitepaper. It describes the target architecture; the anonymity
+      network is not deployed yet.</p>
+    <div class="tscroll">
+      <table>
+        <thead><tr><th>Phase</th><th>Scope</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td>0 — Dogfood</td><td>Desktop app + local GGUF inference (llama.cpp)</td><td><span class="v">done, verified</span></td></tr>
+          <tr><td>1 — MVP</td><td>Relay + broker + blind-token issuer + credits</td><td><span class="warn">in active design/build</span></td></tr>
+          <tr><td>2 — Torrent layer</td><td>P2P content-addressed weight distribution</td><td>planned</td></tr>
+          <tr><td>3 — Decentralize</td><td>DHT tracker, multiple relays, gossip, canary audits</td><td>planned</td></tr>
+          <tr><td>4 — Hardening</td><td>Confidential (TEE) tier + attestation; wider clients</td><td>planned</td></tr>
+        </tbody>
+        <caption class="micro">TABLE 06 — Progressive decentralization. Today: Phase 0 shipped; Phase 1 crypto foundation under construction.</caption>
+      </table>
+    </div>
+    <h3>References</h3>
+    <div class="reflist">
+      RFC 9474 RSA Blind Signatures · RFC 9458 Oblivious HTTP · RFC 9180 HPKE ·
+      RFC 9576/9578 Privacy Pass · draft-ietf-ohai-chunked-ohttp · BIP-39 ·
+      crates: blind-rsa-signatures, ohttp, hpke, ed25519-dalek, argon2, chacha20poly1305, blake3.
+    </div>
+    <p style="margin-top:2rem">
+      <a class="cmd primary" href="index.html"><span class="p">$</span>back to overview</a>
+      <a class="cmd" href="#s01"><span class="p">$</span>top of paper</a>
+    </p>
+  </section>
+
+</div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <div class="colophon">
+      <span class="micro">lluma.bodegga.net · a bodegga project</span>
+      <span class="micro">technical whitepaper · v0.1 draft · 2026-07</span>
+      <span class="micro">zero external requests · no analytics · view source</span>
+    </div>
+  </div>
+</footer>
+
+<button id="toTop" type="button" aria-label="Back to top"><span class="p" aria-hidden="true">↑</span>top</button>
+
+<script>
+(function(){
+  var b=document.getElementById('toTop');
+  if(!b) return;
+  var reduce=window.matchMedia('(prefers-reduced-motion: reduce)');
+  function upd(){ b.classList.toggle('show', window.pageYOffset>600); }
+  window.addEventListener('scroll',upd,{passive:true}); upd();
+  b.addEventListener('click',function(){ window.scrollTo({top:0,behavior:reduce.matches?'auto':'smooth'}); });
+})();
+</script>
+
+</body>
+</html>
