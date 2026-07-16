@@ -1,0 +1,23 @@
+[package]
+name = "lluma-crypto"
+version = "0.0.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lluma-core = { path = "../lluma-core" }
+thiserror = { workspace = true }
+blake3 = { workspace = true }
+zeroize = { workspace = true }
+blind-rsa-signatures = { workspace = true }
+ohttp = { workspace = true }
+hpke = { workspace = true }
+ed25519-dalek = { workspace = true }
+bip39 = { workspace = true }
+argon2 = { workspace = true }
+chacha20poly1305 = { workspace = true }
+rand_core = { workspace = true }
+postcard = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
