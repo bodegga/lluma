@@ -1,10 +1,10 @@
 # Lluma website
 
 The Lluma landing page — a single, self-contained `index.html` (inline CSS + JS,
-embedded fonts, no external requests, no build step). The page reads as the
-protocol specification itself: numbered sections, ruled tables, the void figure,
-and a revision footer. Canonical design spec: [`DESIGN.md`](DESIGN.md)
-(`LLUMA-DESIGN-001`), which supersedes all prior visual direction.
+embedded fonts, no external requests, no build step). The page presents a public
+protocol overview through numbered sections, ruled tables, the void figure, and
+a revision footer. Canonical visual direction: [`DESIGN.md`](DESIGN.md), which
+supersedes all prior visual direction.
 
 ## Preview locally
 

@@ -1,9 +1,10 @@
-# LLUMA — Design Specification
-Doc: LLUMA-DESIGN-001 · Applies to: lluma-web · Supersedes all prior visual direction.
+# LLUMA — Website Design
+Applies to: lluma-web · Supersedes all prior visual direction.
 
 ## Concept
-The website IS the protocol specification. Every page reads like an engineering
-document: numbered sections, ruled tables, captioned figures, revision footers.
+The website presents a public protocol overview using the visual language of an
+engineering document: numbered sections, ruled tables, captioned figures, and a
+revision footer. It is not the canonical protocol specification.
 References: usgraphics.com (document apparatus), owickstrom.github.io/the-monospace-web
 (typographic discipline), oxide.computer (dark restraint + usability).
 The tech speaks. Nothing decorates.
@@ -33,8 +34,9 @@ The tech speaks. Nothing decorates.
    untraceable core). Everything else is tables, section registers, and type.
 7. All measurements in `ch` and `rem`. Max content width: 104ch. Layout snaps to
    the character grid wherever the browser allows.
-8. Section headers are registers: `§ NN — TITLE` left, `LLUMA-SPEC-001 · REV n`
-   right, hairline above and below. Numbering is real document structure.
+8. Section headers are registers: `§ NN — TITLE`, with a hairline above and below.
+   Numbering is real document structure. Internal document IDs do not appear in
+   public-facing copy.
 9. Copy is honest and specific. The Open tier is NEVER called "zero-knowledge."
    Say what each party sees (`sees: ciphertext`). Plain verbs. Sentence case in
    prose; uppercase + tracking reserved for labels and registers.
@@ -68,11 +70,11 @@ Type scale (Ioskeley Mono, single family):
 - Stipple shading: `radial-gradient(var(--faint) 0.8px, transparent 0.9px)` on a
   6px grid, used as the field behind figures (halftone paper texture). Never on
   text containers.
-- Masthead: wordmark left; calibration bar; `LLUMA-SPEC-001 · REV 2 · 2026-07` right.
+- Masthead: wordmark left; calibration bar; document-section navigation right.
 - Figures: captioned `FIG. NN — TITLE`, registration marks (+) at corners,
   hairline frame, labels set in --t-data.
-- Footer: revision history table + colophon line
-  (`built with zero external requests · reticulum-adjacent · bodegga.net`).
+- Footer: one public revision marker plus the colophon line
+  (`zero external requests · no analytics · view source`).
 - Optional debug: `?grid` query param overlays the character grid.
 
 ## Motion policy
