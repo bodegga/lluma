@@ -39,7 +39,8 @@ header.mast{border-bottom:2px solid var(--ink)}
 .wordmark .wm-b{color:var(--red)}
 .wordmark .wm-n{color:var(--orange-ink)}
 .wordmark .wm-dot{color:var(--faint);font-weight:400}
-a.brand{text-decoration:none;cursor:pointer}
+a.brand{text-decoration:none;cursor:pointer;color:inherit;border-bottom:none;background:none}
+a.brand:hover,a.brand:focus-visible{background:none;color:inherit}
 a.brand:hover .wordmark{text-decoration:underline;text-underline-offset:3px}
 .calbar{display:flex;height:0.9rem}
 .calbar span{width:2.4ch}
