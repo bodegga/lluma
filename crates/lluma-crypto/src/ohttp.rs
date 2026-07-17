@@ -7,6 +7,9 @@
 //! succeeding. Single-chunk MVP per spec §4; multi-chunk (chunked-OHTTP draft)
 //! is deferred.
 //!
+//! **Callers MUST treat a stream as complete ONLY when a chunk returns
+//! `is_final == true`; a truncated stream never yields `is_final`.**
+//!
 //! API note (ohttp 0.5.4): `KeyConfig::encode()` is a *public-only* encoding and
 //! `KeyConfig::decode()` drops the private key, so the gateway secret cannot
 //! round-trip through encode/decode. There is also no `private_key_bytes` API.

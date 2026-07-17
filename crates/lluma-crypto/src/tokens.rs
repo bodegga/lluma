@@ -32,8 +32,8 @@ use blind_rsa_signatures::{
 
 use crate::error::{CryptoError, Result};
 use lluma_core::wire::{
-    BlindSignature, BlindedTokenRequest, BlindingState, IssuerPublicKey, IssuerSecretKey,
-    SpendId, Token,
+    BlindSignature, BlindedTokenRequest, BlindingState, IssuerPublicKey, IssuerSecretKey, SpendId,
+    Token,
 };
 
 /// RSA-2048 blind-signature parameters throughout: nonce (32B), blinding
@@ -49,17 +49,27 @@ const MODULUS_BITS: usize = 2048;
 /// The verifier reconstructs the RFC 9474 signed message and checks the sig.
 fn split_token(token: &Token) -> Result<(&[u8], &[u8], &[u8])> {
     let b = &token.0;
-    if b.len() < 64 + 1 {
+    if b.len() != 320 {
         return Err(CryptoError::TokenInvalid);
     }
     Ok((&b[0..32], &b[32..64], &b[64..]))
 }
 
-pub fn issuer_keygen(rng: &mut impl CryptoRng) -> Result<(IssuerSecretKey, IssuerPublicKey)> {
+pub fn issuer_keygen(
+    // Pass a cryptographically secure RNG (`OsRng`) in production; a seeded RNG
+    // is for tests only.
+    rng: &mut impl CryptoRng,
+) -> Result<(IssuerSecretKey, IssuerPublicKey)> {
     let kp =
         RsaKeyPair::generate(rng, MODULUS_BITS).map_err(|e| CryptoError::Blind(e.to_string()))?;
-    let sk_der = kp.sk.to_der().map_err(|e| CryptoError::Blind(e.to_string()))?;
-    let pk_der = kp.pk.to_der().map_err(|e| CryptoError::Blind(e.to_string()))?;
+    let sk_der = kp
+        .sk
+        .to_der()
+        .map_err(|e| CryptoError::Blind(e.to_string()))?;
+    let pk_der = kp
+        .pk
+        .to_der()
+        .map_err(|e| CryptoError::Blind(e.to_string()))?;
     Ok((IssuerSecretKey(sk_der), IssuerPublicKey(pk_der)))
 }
 
@@ -87,7 +97,10 @@ pub fn token_blind(
     let state_bytes =
         postcard::to_allocvec(&state_tuple).map_err(|e| CryptoError::Encoding(e.to_string()))?;
 
-    Ok((BlindingState(state_bytes), BlindedTokenRequest(blind_message)))
+    Ok((
+        BlindingState(state_bytes),
+        BlindedTokenRequest(blind_message),
+    ))
 }
 
 pub fn token_issue(
@@ -102,7 +115,11 @@ pub fn token_issue(
     Ok(BlindSignature(sig.0))
 }
 
-pub fn token_unblind(pk: &IssuerPublicKey, st: BlindingState, sig: &BlindSignature) -> Result<Token> {
+pub fn token_unblind(
+    pk: &IssuerPublicKey,
+    st: BlindingState,
+    sig: &BlindSignature,
+) -> Result<Token> {
     let (nonce, blind_message, secret, randomizer_bytes): BlindStateTuple =
         postcard::from_bytes(&st.0).map_err(|e| CryptoError::Encoding(e.to_string()))?;
 
@@ -127,7 +144,9 @@ pub fn token_unblind(pk: &IssuerPublicKey, st: BlindingState, sig: &BlindSignatu
 
 pub fn token_verify(pk: &IssuerPublicKey, token: &Token) -> Result<()> {
     let (nonce, randomizer, sig_bytes) = split_token(token)?;
-    let randomizer_arr: [u8; 32] = randomizer.try_into().map_err(|_| CryptoError::TokenInvalid)?;
+    let randomizer_arr: [u8; 32] = randomizer
+        .try_into()
+        .map_err(|_| CryptoError::TokenInvalid)?;
     let rsa_pk = RsaPublicKey::from_der(&pk.0).map_err(|_| CryptoError::TokenInvalid)?;
     let rsa_sig = RsaSignature(sig_bytes.to_vec());
     rsa_pk
@@ -168,7 +187,10 @@ mod tests {
     fn tampered_token_fails_verify() {
         let (pk, mut token) = roundtrip_token();
         token.0[0] ^= 0xff;
-        assert!(matches!(token_verify(&pk, &token), Err(CryptoError::TokenInvalid)));
+        assert!(matches!(
+            token_verify(&pk, &token),
+            Err(CryptoError::TokenInvalid)
+        ));
     }
 
     #[test]
@@ -176,7 +198,10 @@ mod tests {
         let mut rng = OsRng;
         let (_, other_pk) = issuer_keygen(&mut rng).unwrap();
         let (_, token) = roundtrip_token();
-        assert!(matches!(token_verify(&other_pk, &token), Err(CryptoError::TokenInvalid)));
+        assert!(matches!(
+            token_verify(&other_pk, &token),
+            Err(CryptoError::TokenInvalid)
+        ));
     }
 
     #[test]

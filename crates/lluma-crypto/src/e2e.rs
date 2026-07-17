@@ -2,14 +2,17 @@
 //! keys and the streamed response context. This is the "inner" seal: it runs
 //! host-public-key -> host-private-key, independent of the outer OHTTP/relay
 //! hop, so no single relay/broker ever sees both plaintext and originator IP.
+//!
+//! **Callers MUST treat a stream as complete ONLY when a chunk returns
+//! `is_final == true`; a truncated stream never yields `is_final`.**
 use crate::error::{CryptoError, Result};
+use hpke::{
+    aead::ChaCha20Poly1305, kdf::HkdfSha256, kem::X25519HkdfSha256, Deserializable,
+    Kem as KemTrait, OpModeR, OpModeS, Serializable,
+};
 use lluma_core::wire::{
     HostPublicKey, HostSecretKey, ResponsePreamble, SealedRequest, SessionPublicKey,
     SessionSecretKey,
-};
-use hpke::{
-    aead::ChaCha20Poly1305, kdf::HkdfSha256, kem::X25519HkdfSha256, Deserializable, Kem as KemTrait,
-    OpModeR, OpModeS, Serializable,
 };
 
 type Kem = X25519HkdfSha256;
@@ -19,6 +22,8 @@ const INFO: &[u8] = b"lluma/e2e/v1";
 const RESP_INFO: &[u8] = b"lluma/e2e/response/v1";
 
 pub fn host_keygen(
+    // Pass a cryptographically secure RNG (`OsRng`) in production; a seeded RNG
+    // is for tests only.
     rng: &mut (impl rand_core::RngCore + rand_core::CryptoRng),
 ) -> Result<(HostSecretKey, HostPublicKey)> {
     let (sk, pk) = Kem::gen_keypair(rng);
@@ -29,6 +34,8 @@ pub fn host_keygen(
 }
 
 pub fn session_keygen(
+    // Pass a cryptographically secure RNG (`OsRng`) in production; a seeded RNG
+    // is for tests only.
     rng: &mut (impl rand_core::RngCore + rand_core::CryptoRng),
 ) -> Result<(SessionSecretKey, SessionPublicKey)> {
     let (sk, pk) = Kem::gen_keypair(rng);
@@ -50,13 +57,24 @@ fn kem_sk(bytes: &[u8]) -> Result<<Kem as KemTrait>::PrivateKey> {
 /// model id/tier) to the ciphertext so a relay cannot swap it onto a
 /// different request. The inner plaintext is `reply_to (32B) || prompt` so
 /// the host learns where to send the response without a second round trip.
+///
+/// Callers MUST bind the request's entitlement token (or its spend id) into
+/// `aad` so the token cannot be detached and replayed against a different
+/// request.
 pub fn e2e_seal(
+    // Pass a cryptographically secure RNG (`OsRng`) in production; a seeded RNG
+    // is for tests only.
     rng: &mut (impl rand_core::RngCore + rand_core::CryptoRng),
     host_pk: &HostPublicKey,
     aad: &[u8],
     prompt: &[u8],
     reply_to: &SessionPublicKey,
 ) -> Result<SealedRequest> {
+    if reply_to.0.len() != 32 {
+        return Err(CryptoError::Hpke(
+            "session public key must be 32 bytes".into(),
+        ));
+    }
     let pk = kem_pk(&host_pk.0)?;
     let (enc, mut ctx) = hpke::setup_sender::<Aead, Kdf, Kem, _>(&OpModeS::Base, &pk, INFO, rng)
         .map_err(|e| CryptoError::Hpke(e.to_string()))?;
@@ -123,7 +141,10 @@ pub fn response_setup_host(
     let pk = kem_pk(&reply_to.0)?;
     let (enc, ctx) = hpke::setup_sender::<Aead, Kdf, Kem, _>(&OpModeS::Base, &pk, RESP_INFO, rng)
         .map_err(|e| CryptoError::Hpke(e.to_string()))?;
-    Ok((HostResponseContext { ctx }, ResponsePreamble(enc.to_bytes().to_vec())))
+    Ok((
+        HostResponseContext { ctx },
+        ResponsePreamble(enc.to_bytes().to_vec()),
+    ))
 }
 
 /// Rebuilds the client/session receiver context from the session secret key
@@ -196,12 +217,26 @@ mod tests {
     }
 
     #[test]
+    fn e2e_seal_rejects_bad_reply_key() {
+        let mut rng = OsRng;
+        let (_hsk, hpk) = host_keygen(&mut rng).unwrap();
+        let bad = SessionPublicKey(vec![0u8; 31]);
+        assert!(matches!(
+            e2e_seal(&mut rng, &hpk, b"aad", b"p", &bad),
+            Err(CryptoError::Hpke(_))
+        ));
+    }
+
+    #[test]
     fn aad_mismatch_fails_closed() {
         let mut rng = OsRng;
         let (hsk, hpk) = host_keygen(&mut rng).unwrap();
         let (_ssk, spk) = session_keygen(&mut rng).unwrap();
         let sealed = e2e_seal(&mut rng, &hpk, b"aad-A", b"p", &spk).unwrap();
-        assert!(matches!(e2e_open(&hsk, b"aad-B", &sealed), Err(CryptoError::AuthFailed)));
+        assert!(matches!(
+            e2e_open(&hsk, b"aad-B", &sealed),
+            Err(CryptoError::AuthFailed)
+        ));
     }
 
     #[test]
@@ -214,7 +249,10 @@ mod tests {
         assert_ne!(a, b, "fresh HPKE ephemeral per seal");
         // enc (32B) + reply_to (32B) + tag (16B) at minimum, so a real seal is
         // well over 32 bytes: proves ciphertext (not just enc) is present.
-        assert!(a.0.len() > 32, "sealed request carries ciphertext, not just enc");
+        assert!(
+            a.0.len() > 32,
+            "sealed request carries ciphertext, not just enc"
+        );
     }
 
     #[test]

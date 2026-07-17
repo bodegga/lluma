@@ -94,7 +94,11 @@ pub fn receipt_verify(
 }
 
 /// Generate 16 bytes of fresh BIP-39 entropy (a 12-word mnemonic's seed).
-pub fn account_mnemonic_new(rng: &mut (impl RngCore + CryptoRng)) -> Result<Mnemonic> {
+pub fn account_mnemonic_new(
+    // Pass a cryptographically secure RNG (`OsRng`) in production; a seeded RNG
+    // is for tests only.
+    rng: &mut (impl RngCore + CryptoRng),
+) -> Result<Mnemonic> {
     let mut entropy = [0u8; 16];
     rng.fill_bytes(&mut entropy);
     Ok(Mnemonic(entropy))
@@ -134,6 +138,8 @@ fn derive_kek(passphrase: &str, salt: &[u8]) -> Result<[u8; 32]> {
 
 /// Seal a mnemonic under a passphrase into an authenticated keystore blob.
 pub fn seal_keystore(
+    // Pass a cryptographically secure RNG (`OsRng`) in production; a seeded RNG
+    // is for tests only.
     rng: &mut (impl RngCore + CryptoRng),
     passphrase: &str,
     mnemonic: &Mnemonic,
@@ -175,6 +181,21 @@ pub fn open_keystore(passphrase: &str, blob: &KeystoreBlob) -> Result<Mnemonic> 
     let b = &blob.0;
     if b.len() < KS_HEADER_LEN + 16 || b[0..4] != KS_MAGIC {
         return Err(CryptoError::AuthFailed);
+    }
+    // Gate on version + stored Argon2 params BEFORE deriving. The header
+    // (incl. these params) is already bound as AEAD AAD in `seal_keystore`, so
+    // a tampered param fails the tag check too; this explicit check also
+    // rejects a well-formed-but-foreign blob whose version/params we don't
+    // support, and it ensures we never feed attacker-controlled m/t/p into
+    // Argon2 — we always derive with the compile-time v1 constants.
+    let version = b[4];
+    let m_cost = u32::from_le_bytes([b[5], b[6], b[7], b[8]]);
+    let t_cost = u32::from_le_bytes([b[9], b[10], b[11], b[12]]);
+    let p_cost = u32::from_le_bytes([b[13], b[14], b[15], b[16]]);
+    if version != KS_VERSION || m_cost != KS_M_COST || t_cost != KS_T_COST || p_cost != KS_P {
+        return Err(CryptoError::Encoding(
+            "unsupported keystore version/params".into(),
+        ));
     }
     let salt = &b[17..33];
     let nonce = &b[33..57];
@@ -299,5 +320,15 @@ mod tests {
             open_keystore("pw", &blob),
             Err(CryptoError::AuthFailed)
         ));
+    }
+
+    #[test]
+    fn keystore_rejects_wrong_version() {
+        let mut rng = rand_core::OsRng;
+        let m = account_mnemonic_new(&mut rng).unwrap();
+        let mut blob = seal_keystore(&mut rng, "pw", &m).unwrap();
+        // Flip the version byte (offset 4, after the 4-byte magic).
+        blob.0[4] = 0xFF;
+        assert!(open_keystore("pw", &blob).is_err());
     }
 }
