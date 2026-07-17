@@ -18,3 +18,18 @@ blake3 = "1"
 sysinfo = "0.33"
 tokio = { version = "1", features = ["full"] }
 reqwest = { version = "0.12", features = ["stream"] }
+zeroize = { version = "1", features = ["derive"] }
+# NOTE: pinned 0.17 (not 0.15) — 0.15.x miscompiles under current rustc
+# (derive_more glob-derive E0659). Side effect: rand_core split — this crate
+# uses rsa::rand_core 0.10.x while ed25519-dalek/hpke use 0.6.x; token code must
+# use the RNG type blind-rsa-signatures expects, not a shared OsRng. See ADR-0001.
+blind-rsa-signatures = "0.17"
+ohttp = { version = "0.5", default-features = false, features = ["rust-hpke", "client", "server"] }
+hpke = "0.12"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+bip39 = "2"
+argon2 = "0.5"
+chacha20poly1305 = "0.10"
+rand_core = "0.6"
+postcard = { version = "1", features = ["use-std"] }
+proptest = "1"

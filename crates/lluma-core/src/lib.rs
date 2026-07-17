@@ -2,6 +2,7 @@
 pub mod error;
 pub mod hardware;
 pub mod model;
+pub mod wire;
 
 pub use error::{LlumaError, Result};
 pub use hardware::HardwareProfile;
