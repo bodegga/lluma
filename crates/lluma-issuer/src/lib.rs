@@ -9,6 +9,7 @@ pub mod error;
 pub mod idem;
 pub mod keys;
 pub mod ledger;
+pub mod service;
 pub mod spent_set;
 
 pub use error::IssuerError;
