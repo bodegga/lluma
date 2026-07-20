@@ -1,0 +1,27 @@
+[package]
+name = "lluma-client"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+lluma-core = { path = "../lluma-core" }
+lluma-crypto = { path = "../lluma-crypto" }
+lluma-net = { path = "../lluma-net" }
+blind-rsa-signatures = { workspace = true }
+rand_core = { workspace = true }
+serde_json = { workspace = true }
+postcard = { workspace = true }
+blake3 = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+axum = "0.7"
+reqwest = { workspace = true }
+base64 = "0.22"
+lluma-issuer = { path = "../lluma-issuer" }
+lluma-broker = { path = "../lluma-broker" }
+lluma-gateway = { path = "../lluma-gateway" }
+lluma-relay = { path = "../lluma-relay" }
+lluma-host = { path = "../lluma-host" }

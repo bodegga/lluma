@@ -10,7 +10,7 @@
 pub mod v1 {
     use crate::wire::{
         AccountId, BlindSignature, BlindedTokenRequest, IssueRequestBody, IssueSignature,
-        IssuerPublicKey, SpendId, Token,
+        IssuerPublicKey, ResponsePreamble, SealedRequest, SpendId, Token,
     };
     use base64::{engine::general_purpose::STANDARD, Engine};
     use serde::{Deserialize, Serialize};
@@ -114,6 +114,45 @@ pub mod v1 {
         }
     }
 
+    mod b64_sealed {
+        use super::{Engine, SealedRequest, STANDARD};
+        use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+        pub fn serialize<S: Serializer>(x: &SealedRequest, s: S) -> Result<S::Ok, S::Error> {
+            STANDARD.encode(&x.0).serialize(s)
+        }
+        pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<SealedRequest, D::Error> {
+            let st: String = Deserialize::deserialize(d)?;
+            Ok(SealedRequest(STANDARD.decode(st).map_err(serde::de::Error::custom)?))
+        }
+    }
+
+    mod b64_preamble {
+        use super::{Engine, ResponsePreamble, STANDARD};
+        use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+        pub fn serialize<S: Serializer>(x: &ResponsePreamble, s: S) -> Result<S::Ok, S::Error> {
+            STANDARD.encode(&x.0).serialize(s)
+        }
+        pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<ResponsePreamble, D::Error> {
+            let st: String = Deserialize::deserialize(d)?;
+            Ok(ResponsePreamble(STANDARD.decode(st).map_err(serde::de::Error::custom)?))
+        }
+    }
+
+    mod b64_vec {
+        use super::{Engine, STANDARD};
+        use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+        pub fn serialize<S: Serializer>(x: &[u8], s: S) -> Result<S::Ok, S::Error> {
+            STANDARD.encode(x).serialize(s)
+        }
+        pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<Vec<u8>, D::Error> {
+            let st: String = Deserialize::deserialize(d)?;
+            STANDARD.decode(st).map_err(serde::de::Error::custom)
+        }
+    }
+
     /// DTO-level error. Length/shape failures only — never carries wire bytes.
     #[derive(Debug, thiserror::Error, PartialEq, Eq)]
     pub enum ProtoError {
@@ -167,6 +206,74 @@ pub mod v1 {
     pub struct GrantRequest {
         pub account_id: AccountId,
         pub amount: u64,
+    }
+
+    /// `POST /v1/exec` — redeem a token and forward an E2E-sealed request. The
+    /// broker verifies + spends the token, then forwards `{spend_id, sealed}` to
+    /// the resolved host. `sealed` is the HPKE `SealedRequest` (aad = spend_id).
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct ExecRequest {
+        pub key_id: [u8; 32],
+        #[serde(with = "b64_token")]
+        pub token: Token,
+        #[serde(with = "b64_sealed")]
+        pub sealed: SealedRequest,
+    }
+
+    /// `POST /v1/exec` response — the host's OHTTP-style response (single final
+    /// chunk): a `preamble` (session KEM encap) + one sealed `chunk`.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct ExecResponse {
+        #[serde(with = "b64_preamble")]
+        pub preamble: ResponsePreamble,
+        #[serde(with = "b64_vec")]
+        pub chunk: Vec<u8>,
+    }
+
+    /// Broker → host hop: the spent-and-verified `spend_id` plus the sealed
+    /// request. Carries NO token, NO account — the host sees content, never
+    /// identity or IP.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct HostExecRequest {
+        pub spend_id: SpendId,
+        #[serde(with = "b64_sealed")]
+        pub sealed: SealedRequest,
+    }
+
+    impl HostExecRequest {
+        pub fn validate(&self) -> Result<(), ProtoError> {
+            if self.sealed.0.is_empty() {
+                return Err(ProtoError::WrongLength("sealed"));
+            }
+            Ok(())
+        }
+    }
+
+    impl ExecRequest {
+        pub fn validate(&self) -> Result<(), ProtoError> {
+            if self.token.0.len() != 320 {
+                return Err(ProtoError::WrongLength("token"));
+            }
+            if self.sealed.0.is_empty() {
+                return Err(ProtoError::WrongLength("sealed"));
+            }
+            Ok(())
+        }
+    }
+
+    impl ExecResponse {
+        pub fn validate(&self) -> Result<(), ProtoError> {
+            if self.preamble.0.is_empty() {
+                return Err(ProtoError::WrongLength("preamble"));
+            }
+            if self.chunk.is_empty() {
+                return Err(ProtoError::WrongLength("chunk"));
+            }
+            Ok(())
+        }
     }
 
     impl KeyConfigResponse {
