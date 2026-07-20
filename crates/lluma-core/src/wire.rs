@@ -110,3 +110,26 @@ pub struct UsageReceiptBody {
     pub epoch: u32,
     pub timestamp_h: u32,
 }
+
+/// Canonical issue-request body, signed by the consumer's account Ed25519 key
+/// to authorize an issue batch. `account` is the signer's own public-key bytes
+/// (32 B). Domain-separated from usage-receipt signing (see `lluma-crypto`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueRequestBody {
+    pub version: u8,
+    pub account: [u8; 32],
+    pub key_id: [u8; 32],
+    pub request_id: [u8; 32],
+    pub ts_unix_s: u64,
+    pub blinded_batch_hash: [u8; 32],
+}
+
+/// Ed25519 signature (64 B) over the canonical `IssueRequestBody`. Public
+/// material — Debug is safe (no secret bytes).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IssueSignature(pub Vec<u8>);
+impl AsRef<[u8]> for IssueSignature {
+    fn as_ref(&self) -> &[u8] {
+        &self.0
+    }
+}

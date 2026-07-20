@@ -8,8 +8,8 @@
 
 use crate::error::{CryptoError, Result};
 use lluma_core::wire::{
-    AccountId, AccountPublicKey, AccountSecretKey, KeystoreBlob, Mnemonic, ReceiptSignature,
-    UsageReceiptBody,
+    AccountId, AccountPublicKey, AccountSecretKey, IssueRequestBody, IssueSignature, KeystoreBlob,
+    Mnemonic, ReceiptSignature, UsageReceiptBody,
 };
 
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -22,6 +22,7 @@ use ed25519_dalek::{Signature, Signer, SigningKey, Verifier, VerifyingKey};
 use rand_core::{CryptoRng, RngCore};
 
 const RECEIPT_DOMAIN: &[u8] = b"lluma-usage-receipt-v1";
+const ISSUE_REQUEST_DOMAIN: &[u8] = b"lluma-issue-request-v1";
 
 // Keystore blob layout:
 //   magic(4) ‖ version(1) ‖ argon2 m_cost(4 LE) ‖ t_cost(4 LE) ‖ p(4 LE)
@@ -83,6 +84,45 @@ pub fn receipt_verify(
 ) -> Result<()> {
     let key = verifying_key(pk)?;
     let msg = canonical(body)?;
+    let sig_bytes: [u8; 64] = sig
+        .0
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::BadSignature)?;
+    let signature = Signature::from_bytes(&sig_bytes);
+    key.verify(&msg, &signature)
+        .map_err(|_| CryptoError::BadSignature)
+}
+
+/// Domain-separated canonical bytes signed for an issue request:
+/// `b"lluma-issue-request-v1" ‖ postcard(body)`. Distinct from
+/// `RECEIPT_DOMAIN` — never shared.
+fn issue_canonical(body: &IssueRequestBody) -> Result<Vec<u8>> {
+    let mut out = ISSUE_REQUEST_DOMAIN.to_vec();
+    let enc = postcard::to_stdvec(body).map_err(|e| CryptoError::Encoding(e.to_string()))?;
+    out.extend_from_slice(&enc);
+    Ok(out)
+}
+
+/// Sign an `IssueRequestBody` with the consumer's Ed25519 account secret key.
+/// Deterministic — no RNG (matches `receipt_sign`).
+pub fn issue_request_sign(
+    sk: &AccountSecretKey,
+    body: &IssueRequestBody,
+) -> Result<IssueSignature> {
+    let key = signing_key(sk)?;
+    let msg = issue_canonical(body)?;
+    Ok(IssueSignature(key.sign(&msg).to_bytes().to_vec()))
+}
+
+/// Verify an issue-request signature. Any mismatch returns `BadSignature`.
+pub fn issue_request_verify(
+    pk: &AccountPublicKey,
+    body: &IssueRequestBody,
+    sig: &IssueSignature,
+) -> Result<()> {
+    let key = verifying_key(pk)?;
+    let msg = issue_canonical(body)?;
     let sig_bytes: [u8; 64] = sig
         .0
         .as_slice()
@@ -330,5 +370,49 @@ mod tests {
         // Flip the version byte (offset 4, after the 4-byte magic).
         blob.0[4] = 0xFF;
         assert!(open_keystore("pw", &blob).is_err());
+    }
+
+    fn sample_issue_body() -> IssueRequestBody {
+        IssueRequestBody {
+            version: 1,
+            account: [7u8; 32],
+            key_id: [9u8; 32],
+            request_id: [11u8; 32],
+            ts_unix_s: 1_700_000_000,
+            blinded_batch_hash: [13u8; 32],
+        }
+    }
+
+    #[test]
+    fn issue_request_sign_verify_round_trip() {
+        let (sk, pk) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+        let body = sample_issue_body();
+        let sig = issue_request_sign(&sk, &body).unwrap();
+        assert!(issue_request_verify(&pk, &body, &sig).is_ok());
+    }
+
+    #[test]
+    fn issue_request_tampered_key_id_fails() {
+        let (sk, pk) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+        let body = sample_issue_body();
+        let sig = issue_request_sign(&sk, &body).unwrap();
+        let mut tampered = body.clone();
+        tampered.key_id[0] ^= 0xff;
+        assert!(matches!(
+            issue_request_verify(&pk, &tampered, &sig),
+            Err(CryptoError::BadSignature)
+        ));
+    }
+
+    #[test]
+    fn issue_request_signature_from_other_account_fails() {
+        let (sk1, _pk1) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+        let (_sk2, pk2) = derive_keypair_from_seed(&Mnemonic([2u8; 16])).unwrap();
+        let body = sample_issue_body();
+        let sig = issue_request_sign(&sk1, &body).unwrap();
+        assert!(matches!(
+            issue_request_verify(&pk2, &body, &sig),
+            Err(CryptoError::BadSignature)
+        ));
     }
 }
