@@ -6,5 +6,6 @@
 //! state layer; HTTP handlers land in Task 7+.
 
 pub mod error;
+pub mod ledger;
 
 pub use error::IssuerError;

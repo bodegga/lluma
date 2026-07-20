@@ -73,10 +73,11 @@ impl core::fmt::Debug for BlindSignature {
     }
 }
 
-// Fixed-size content-addressed ids.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+// Fixed-size content-addressed ids. `Hash` is derived so they can key the
+// issuer's `HashMap`/`HashSet` state (ledger balances, spent-set, idem cache).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct SpendId(pub [u8; 32]);
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct AccountId(pub [u8; 32]);
 
 // Secret material (zeroize on drop; no Debug/Serialize).
