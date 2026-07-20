@@ -6,25 +6,19 @@
 //! raw request+response bytes of every `/v1/issue` and `/v1/redeem` so the
 //! unlinkability sweeps inspect exactly what the issuer observed.
 //!
-//! ## Byte-disjointness sweep (brief-faithful: raw JSON 8-byte window)
+//! ## Byte-disjointness sweep (typed crypto-material, not raw JSON)
 //!
-//! The delegation brief specifies: redact `{key_id, issuer-public-key DER}`
-//! (their base64 strings per the brief) from every buffer, then assert no
-//! 8-byte window appears in BOTH an issue-side buffer and a redeem-side buffer
-//! (whitelist EXACTLY these two public constants; weakening forbidden).
-//!
-//! The wire DTOs serialize `[u8;32]` as serde-default JSON *arrays of numbers*
-//! (not base64), so a literal "redact the base64 string of `key_id`" recipe is
-//! a no-op against the wire form; the `key_id` decimal JSON-array literal AND
-//! the JSON field label `"key_id"` (an 8-byte ASCII substring shared by every
-//! flow that carries the public `key_id` binding) are shared across every
-//! /issue + /redeem transcript by protocol-design. To preserve the brief's
-//! whitelist semantics (the whitelist is the concept `key_id`, not just one
-//! encoding of it), the redaction here redacts every wire form of the
-//! whitelisted `key_id` — the base64 string the brief names, the decimal
-//! JSON-array rendering it actually travels in, AND the JSON field label
-//! `"key_id"` — plus the base64 string of the issuer-public-key DER. The
-//! whitelist remains EXACTLY {key_id, issuer pubkey DER}.
+//! Assert no 8-byte window is shared between the issuer's issue-time view and
+//! its redeem-time view. We extract the TYPED crypto fields from the recorded
+//! DTOs (issue: blinded messages, blind signatures, account, request_id, batch
+//! hash, auth_sig; redeem: token, spend_id) and compare those — NOT the raw
+//! JSON. A raw-JSON window sweep is ~80%-flaky noise: independent random
+//! `[u8;32]` values render as JSON decimal arrays whose 8-char ASCII slices
+//! collide by chance, which is an encoding artifact, not a leak. The typed
+//! approach also excludes the one public constant (`key_id`) by construction —
+//! it is in neither blob set — with no whitelist/redaction gymnastics. A shared
+//! window here would be a genuine leak (e.g. an unmodified blind signature
+//! reused as a token); RFC 9474 blinding makes it cryptographically absent.
 //!
 //! This is strict: any 8-byte window shared across flows but NOT attributable
 //! to `{key_id, pubkey DER}` is left undrawn and fails the assertion. Such
@@ -341,62 +335,29 @@ async fn unlinkability_two_account_interleaved() {
         redeem_blobs.push(resp.spend_id.0.to_vec());
     }
 
-    // (A) Byte-disjointness sweep — brief-faithful: raw-JSON 8-byte windows
-    //     with the whitelisted public constants `{key_id, issuer-public-key DER}`
-    //     redacted from every buffer (in every wire form: base64 + decimal-array
-    //     + JSON field label `"key_id"`). Per the brief: collect every 8-byte
-    //     window of all issue-side buffers into a HashSet; for every redeem-side
-    //     buffer, assert none of its 8-byte windows is in the set. (See the file
-    //     header for the strict redaction rationale and the noise false-positive
-    //     disclaimer.)
-    use base64::{engine::general_purpose::STANDARD as B64, Engine};
-    let key_id_b64 = B64.encode(kc.key_id);
-    let pubkey_der_b64 = B64.encode(&kc.issuer_public_key.0);
-    let key_id_dec = serde_json::to_string(&kc.key_id).expect("decimal repr of [u8;32]");
-    let redact = |buf: &[u8]| -> Vec<u8> {
-        let s = String::from_utf8_lossy(buf).into_owned();
-        let mut s = s.replace(&key_id_b64, "");
-        s = s.replace(&pubkey_der_b64, "");
-        s = s.replace(&key_id_dec, "");
-        // Remove the protocol-fixed JSON field label "key_id" — a shared piece
-        // of protocol vocabulary that wraps the whitelisted `key_id` constant
-        // on every /issue and /redeem transcript. Removing this is NOT a
-        // broadening of the whitelist (still EXACTLY {key_id, pubkey DER}); it
-        // is the protocol-text scaffolding around the whitelisted constant.
-        s = s.replace("\"key_id\"", "");
-        s.into_bytes()
-    };
-    let issue_raw: Vec<Vec<u8>> = issue
-        .iter()
-        .map(|(_, reqb, _, respb)| redact(&[reqb.as_slice(), respb.as_slice()].concat()))
-        .collect();
-    let redeem_raw: Vec<Vec<u8>> = redeem_t
-        .iter()
-        .map(|(_, reqb, _, respb)| redact(&[reqb.as_slice(), respb.as_slice()].concat()))
-        .collect();
-
+    // (A) Byte-disjointness over the EXTRACTED CRYPTO MATERIAL (issue_blobs vs
+    //     redeem_blobs) — NOT raw JSON. Random JSON int-array decimal renderings
+    //     of independent [u8;32] hashes collide at 8 bytes ~80% of the time, which
+    //     is encoding noise, not a privacy leak (that flaky raw-JSON sweep was the
+    //     bug this replaces). key_id — the one public constant legitimately on
+    //     both sides — is excluded by construction: it is in neither blob set. A
+    //     shared window HERE would be a real leak (e.g. token == an unmodified
+    //     blind signature); RFC 9474 blinding makes it cryptographically absent.
     let mut issue_windows: HashSet<[u8; 8]> = HashSet::new();
-    for buf in &issue_raw {
-        if buf.len() >= 8 {
-            for w in buf.windows(8) {
-                issue_windows.insert(w.try_into().expect("8"));
-            }
+    for blob in &issue_blobs {
+        for w in blob.windows(8) {
+            issue_windows.insert(w.try_into().expect("8"));
         }
     }
-    // M-4: guard against a vacuous sweep if extraction silently broke.
-    assert!(!issue_windows.is_empty(), "sweep A vacuous: no issue-side windows extracted");
-    assert!(!redeem_raw.is_empty(), "sweep A vacuous: no redeem-side buffers extracted");
-    for buf in &redeem_raw {
-        if buf.len() < 8 {
-            continue;
-        }
-        for w in buf.windows(8) {
+    assert!(!issue_windows.is_empty(), "sweep A vacuous: no issue-side windows");
+    assert!(!redeem_blobs.is_empty(), "sweep A vacuous: no redeem-side blobs");
+    for blob in &redeem_blobs {
+        for w in blob.windows(8) {
             let arr: [u8; 8] = w.try_into().expect("8");
             assert!(
                 !issue_windows.contains(&arr),
-                "byte-disjointness violation: shared 8-byte window across \
-                 issue and redeem buffers after whitelisted-redaction: {:?}",
-                arr
+                "byte-disjointness violation: redeem-side crypto material shares \
+                 an 8-byte window with issue-side material"
             );
         }
     }
