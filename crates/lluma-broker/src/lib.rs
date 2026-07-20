@@ -8,11 +8,15 @@
 //! remaining #4 work (see the design spec).
 
 pub mod error;
+pub mod hosts;
 pub mod ledger;
+pub mod service;
 pub mod spent;
 pub mod store;
 
 pub use error::BrokerError;
+pub use hosts::{HostEntry, StaticHostDirectory};
 pub use ledger::RedbLedger;
+pub use service::{router, BrokerState};
 pub use spent::RedbSpentSet;
 pub use store::Store;
