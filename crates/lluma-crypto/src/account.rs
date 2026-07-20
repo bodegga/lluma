@@ -8,8 +8,8 @@
 
 use crate::error::{CryptoError, Result};
 use lluma_core::wire::{
-    AccountId, AccountPublicKey, AccountSecretKey, IssueRequestBody, IssueSignature, KeystoreBlob,
-    Mnemonic, ReceiptSignature, UsageReceiptBody,
+    AccountId, AccountPublicKey, AccountSecretKey, HeartbeatBody, HostRegisterBody,
+    IssueRequestBody, IssueSignature, KeystoreBlob, Mnemonic, ReceiptSignature, UsageReceiptBody,
 };
 
 use argon2::{Algorithm, Argon2, Params, Version};
@@ -23,6 +23,9 @@ use rand_core::{CryptoRng, RngCore};
 
 const RECEIPT_DOMAIN: &[u8] = b"lluma-usage-receipt-v1";
 const ISSUE_REQUEST_DOMAIN: &[u8] = b"lluma-issue-request-v1";
+const HOST_REGISTER_DOMAIN: &[u8] = b"lluma-host-register-v1";
+const HEARTBEAT_DOMAIN: &[u8] = b"lluma-heartbeat-v1";
+const SNAPSHOT_DOMAIN: &[u8] = b"lluma-registry-snapshot-v1";
 
 // Keystore blob layout:
 //   magic(4) ‖ version(1) ‖ argon2 m_cost(4 LE) ‖ t_cost(4 LE) ‖ p(4 LE)
@@ -131,6 +134,190 @@ pub fn issue_request_verify(
     let signature = Signature::from_bytes(&sig_bytes);
     key.verify(&msg, &signature)
         .map_err(|_| CryptoError::BadSignature)
+}
+
+/// Domain-separated canonical bytes signed for a host-register request:
+/// `b"lluma-host-register-v1" ‖ postcard(body)`. Distinct from the receipt
+/// and issue-request domains — never shared.
+fn host_register_canonical(body: &HostRegisterBody) -> Result<Vec<u8>> {
+    let mut out = HOST_REGISTER_DOMAIN.to_vec();
+    let enc = postcard::to_stdvec(body).map_err(|e| CryptoError::Encoding(e.to_string()))?;
+    out.extend_from_slice(&enc);
+    Ok(out)
+}
+
+/// Sign a `HostRegisterBody` with the host's Ed25519 account secret key.
+/// Deterministic — no RNG (matches `receipt_sign`).
+pub fn host_register_sign(
+    sk: &AccountSecretKey,
+    body: &HostRegisterBody,
+) -> Result<ReceiptSignature> {
+    let key = signing_key(sk)?;
+    let msg = host_register_canonical(body)?;
+    Ok(ReceiptSignature(key.sign(&msg).to_bytes().to_vec()))
+}
+
+/// Verify a host-register signature. Any mismatch returns `BadSignature`.
+pub fn host_register_verify(
+    pk: &AccountPublicKey,
+    body: &HostRegisterBody,
+    sig: &ReceiptSignature,
+) -> Result<()> {
+    let key = verifying_key(pk)?;
+    let msg = host_register_canonical(body)?;
+    let sig_bytes: [u8; 64] = sig
+        .0
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::BadSignature)?;
+    let signature = Signature::from_bytes(&sig_bytes);
+    key.verify(&msg, &signature)
+        .map_err(|_| CryptoError::BadSignature)
+}
+
+/// Domain-separated canonical bytes signed for a heartbeat:
+/// `b"lluma-heartbeat-v1" ‖ postcard(body)`. Distinct from the other domains
+/// — never shared.
+fn heartbeat_canonical(body: &HeartbeatBody) -> Result<Vec<u8>> {
+    let mut out = HEARTBEAT_DOMAIN.to_vec();
+    let enc = postcard::to_stdvec(body).map_err(|e| CryptoError::Encoding(e.to_string()))?;
+    out.extend_from_slice(&enc);
+    Ok(out)
+}
+
+/// Sign a `HeartbeatBody` with the host's Ed25519 account secret key.
+/// Deterministic — no RNG (matches `receipt_sign`).
+pub fn heartbeat_sign(
+    sk: &AccountSecretKey,
+    body: &HeartbeatBody,
+) -> Result<ReceiptSignature> {
+    let key = signing_key(sk)?;
+    let msg = heartbeat_canonical(body)?;
+    Ok(ReceiptSignature(key.sign(&msg).to_bytes().to_vec()))
+}
+
+/// Verify a heartbeat signature. Any mismatch returns `BadSignature`.
+pub fn heartbeat_verify(
+    pk: &AccountPublicKey,
+    body: &HeartbeatBody,
+    sig: &ReceiptSignature,
+) -> Result<()> {
+    let key = verifying_key(pk)?;
+    let msg = heartbeat_canonical(body)?;
+    let sig_bytes: [u8; 64] = sig
+        .0
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::BadSignature)?;
+    let signature = Signature::from_bytes(&sig_bytes);
+    key.verify(&msg, &signature)
+        .map_err(|_| CryptoError::BadSignature)
+}
+
+/// Domain-separated canonical bytes signed for a registry snapshot:
+/// `b"lluma-registry-snapshot-v1" ‖ snapshot_bytes`. The signed message is the
+/// raw padded snapshot bucket, NOT a postcard body — distinct domain prefix
+/// keeps it non-interchangeable with the body-signed domains.
+fn snapshot_canonical(snapshot_bytes: &[u8]) -> Vec<u8> {
+    let mut out = SNAPSHOT_DOMAIN.to_vec();
+    out.extend_from_slice(snapshot_bytes);
+    out
+}
+
+/// Sign raw registry-snapshot bytes with the broker's Ed25519 account secret
+/// key. Deterministic — no RNG (matches `receipt_sign`).
+pub fn snapshot_sign(
+    sk: &AccountSecretKey,
+    snapshot_bytes: &[u8],
+) -> Result<ReceiptSignature> {
+    let key = signing_key(sk)?;
+    let msg = snapshot_canonical(snapshot_bytes);
+    Ok(ReceiptSignature(key.sign(&msg).to_bytes().to_vec()))
+}
+
+/// Verify a registry-snapshot signature. Any mismatch returns `BadSignature`.
+pub fn snapshot_verify(
+    pk: &AccountPublicKey,
+    snapshot_bytes: &[u8],
+    sig: &ReceiptSignature,
+) -> Result<()> {
+    let key = verifying_key(pk)?;
+    let msg = snapshot_canonical(snapshot_bytes);
+    let sig_bytes: [u8; 64] = sig
+        .0
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::BadSignature)?;
+    let signature = Signature::from_bytes(&sig_bytes);
+    key.verify(&msg, &signature)
+        .map_err(|_| CryptoError::BadSignature)
+}
+
+// ---- Anti-Sybil proof-of-work (Fable ruling; #4 Task 1, controller-authored) ----
+//
+// PoW = `blake3(DOMAIN ‖ account_pk[32] ‖ nonce[8] ‖ epoch_salt[32])` must have
+// at least `difficulty_bits` leading zero bits. All variable inputs are
+// fixed-width (typed in the signature), so concatenation is unambiguous with no
+// length prefixes. The DOMAIN is per-purpose so one solve cannot serve both the
+// trial-registration and host-registration gates. `epoch_salt` is a single
+// global value per epoch (published; verifier accepts k and k−1) — never
+// per-requester, which would be a linkage tag. Verification is one hash and all
+// inputs are public, so there is no timing side channel to worry about.
+
+/// PoW domain for issuer trial registration.
+pub const POW_TRIAL_DOMAIN: &[u8] = b"lluma-pow-trial-v1";
+/// PoW domain for host registration.
+pub const POW_HOST_DOMAIN: &[u8] = b"lluma-pow-host-v1";
+
+/// Count leading zero **bits** in a 32-byte BLAKE3 digest (big-endian).
+fn leading_zero_bits(h: &[u8; 32]) -> u32 {
+    let mut bits = 0u32;
+    for &b in h.iter() {
+        if b == 0 {
+            bits += 8;
+        } else {
+            bits += b.leading_zeros();
+            break;
+        }
+    }
+    bits
+}
+
+/// Verify a proof-of-work under `domain`: the BLAKE3 digest of
+/// `domain ‖ account_pk ‖ nonce ‖ epoch_salt` must have `>= difficulty_bits`
+/// leading zero bits. Returns `true` iff the work is sufficient.
+pub fn pow_verify(
+    domain: &[u8],
+    account_pk: &[u8; 32],
+    nonce: &[u8; 8],
+    epoch_salt: &[u8; 32],
+    difficulty_bits: u32,
+) -> bool {
+    let mut hasher = blake3::Hasher::new();
+    hasher.update(domain);
+    hasher.update(account_pk);
+    hasher.update(nonce);
+    hasher.update(epoch_salt);
+    let h = *hasher.finalize().as_bytes();
+    leading_zero_bits(&h) >= difficulty_bits
+}
+
+/// Solve a proof-of-work by scanning a little-endian `u64` nonce until
+/// `pow_verify` holds. Client/test helper — the broker only ever verifies.
+pub fn pow_solve(
+    domain: &[u8],
+    account_pk: &[u8; 32],
+    epoch_salt: &[u8; 32],
+    difficulty_bits: u32,
+) -> [u8; 8] {
+    let mut n: u64 = 0;
+    loop {
+        let nonce = n.to_le_bytes();
+        if pow_verify(domain, account_pk, &nonce, epoch_salt, difficulty_bits) {
+            return nonce;
+        }
+        n = n.wrapping_add(1);
+    }
 }
 
 /// Generate 16 bytes of fresh BIP-39 entropy (a 12-word mnemonic's seed).
@@ -414,5 +601,153 @@ mod tests {
             issue_request_verify(&pk2, &body, &sig),
             Err(CryptoError::BadSignature)
         ));
+    }
+
+    fn sample_host_register_body() -> HostRegisterBody {
+        HostRegisterBody {
+            version: 1,
+            host_account: [7u8; 32],
+            hpke_pk: vec![0xAA; 32],
+            ingress_addr: "127.0.0.1:9000".into(),
+            models: vec![ModelId("qwen2.5-0.5b-instruct".into())],
+        }
+    }
+
+    #[test]
+    fn host_register_sign_verify_round_trip() {
+        let (sk, pk) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+        let body = sample_host_register_body();
+        let sig = host_register_sign(&sk, &body).unwrap();
+        assert!(host_register_verify(&pk, &body, &sig).is_ok());
+    }
+
+    #[test]
+    fn host_register_tampered_fails() {
+        let (sk, pk) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+        let body = sample_host_register_body();
+        let sig = host_register_sign(&sk, &body).unwrap();
+        let mut tampered = body.clone();
+        tampered.ingress_addr = "127.0.0.1:9001".into();
+        assert!(matches!(
+            host_register_verify(&pk, &tampered, &sig),
+            Err(CryptoError::BadSignature)
+        ));
+    }
+
+    fn sample_heartbeat_body() -> HeartbeatBody {
+        HeartbeatBody {
+            version: 1,
+            host_account: [7u8; 32],
+            hb_counter: 42,
+            load_bucket: 3,
+            models: vec![ModelId("qwen2.5-0.5b-instruct".into())],
+        }
+    }
+
+    #[test]
+    fn heartbeat_sign_verify_round_trip() {
+        let (sk, pk) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+        let body = sample_heartbeat_body();
+        let sig = heartbeat_sign(&sk, &body).unwrap();
+        assert!(heartbeat_verify(&pk, &body, &sig).is_ok());
+    }
+
+    #[test]
+    fn heartbeat_wrong_key_fails() {
+        let (sk1, _pk1) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+        let (_sk2, pk2) = derive_keypair_from_seed(&Mnemonic([2u8; 16])).unwrap();
+        let body = sample_heartbeat_body();
+        let sig = heartbeat_sign(&sk1, &body).unwrap();
+        assert!(matches!(
+            heartbeat_verify(&pk2, &body, &sig),
+            Err(CryptoError::BadSignature)
+        ));
+    }
+
+    #[test]
+    fn snapshot_sign_verify_round_trip() {
+        let (sk, pk) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+        let bytes = [0u8; 100];
+        let sig = snapshot_sign(&sk, &bytes).unwrap();
+        assert!(snapshot_verify(&pk, &bytes, &sig).is_ok());
+    }
+
+    #[test]
+    fn snapshot_tampered_fails() {
+        let (sk, pk) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+        let bytes = [0u8; 100];
+        let sig = snapshot_sign(&sk, &bytes).unwrap();
+        let mut tampered = bytes;
+        tampered[10] ^= 0xff;
+        assert!(matches!(
+            snapshot_verify(&pk, &tampered, &sig),
+            Err(CryptoError::BadSignature)
+        ));
+    }
+
+    #[test]
+    fn cross_domain_signature_rejected() {
+        // A signature produced under the heartbeat domain must NOT verify under
+        // the host-register domain, even if the overlapping body fields match —
+        // the distinct domain prefix forces verification to fail.
+        let (sk, _pk) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+        let (.., pk_other) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+        let hb = HeartbeatBody {
+            version: 1,
+            host_account: [7u8; 32],
+            hb_counter: 0,
+            load_bucket: 0,
+            models: vec![],
+        };
+        let reg = HostRegisterBody {
+            version: 1,
+            host_account: [7u8; 32],
+            hpke_pk: vec![],
+            ingress_addr: String::new(),
+            models: vec![],
+        };
+        let sig = heartbeat_sign(&sk, &hb).unwrap();
+        assert!(matches!(
+            host_register_verify(&pk_other, &reg, &sig),
+            Err(CryptoError::BadSignature)
+        ));
+    }
+
+    // ---- proof-of-work (controller) ----
+
+    #[test]
+    fn pow_solve_then_verify_accepts_and_rejects_harder() {
+        // Keep the difficulty small so the test solves quickly and deterministically.
+        let d = 12u32;
+        let pk = [3u8; 32];
+        let salt = [9u8; 32];
+        let nonce = pow_solve(POW_TRIAL_DOMAIN, &pk, &salt, d);
+        assert!(pow_verify(POW_TRIAL_DOMAIN, &pk, &nonce, &salt, d));
+        // An impossible difficulty (>256, the max leading-zero bits of a 32-byte
+        // digest) can never be satisfied — guaranteed rejection, no flakiness.
+        assert!(!pow_verify(POW_TRIAL_DOMAIN, &pk, &nonce, &salt, 257));
+    }
+
+    #[test]
+    fn pow_domain_separation_a_trial_solve_fails_under_host_domain() {
+        let d = 12u32;
+        let pk = [4u8; 32];
+        let salt = [1u8; 32];
+        let nonce = pow_solve(POW_TRIAL_DOMAIN, &pk, &salt, d);
+        // Same nonce under the HOST domain is a different hash — must not verify
+        // (per-purpose domain separation: one solve cannot serve both gates).
+        assert!(!pow_verify(POW_HOST_DOMAIN, &pk, &nonce, &salt, d));
+    }
+
+    #[test]
+    fn pow_rejects_wrong_salt_and_wrong_account() {
+        let d = 12u32;
+        let pk = [5u8; 32];
+        let salt = [2u8; 32];
+        let nonce = pow_solve(POW_HOST_DOMAIN, &pk, &salt, d);
+        assert!(pow_verify(POW_HOST_DOMAIN, &pk, &nonce, &salt, d));
+        // A different epoch_salt or account invalidates the work.
+        assert!(!pow_verify(POW_HOST_DOMAIN, &pk, &nonce, &[3u8; 32], d));
+        assert!(!pow_verify(POW_HOST_DOMAIN, &[6u8; 32], &nonce, &salt, d));
     }
 }
