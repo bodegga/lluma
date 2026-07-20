@@ -80,6 +80,15 @@ pub struct CounterRow {
     pub trial_granted: u64,
 }
 
+/// A credit-ledger row (keyed by `AccountId` = `account_fingerprint(pubkey)`).
+/// Shared by `RedbLedger` and receipt crediting so both write the same layout.
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+pub struct LedgerRow {
+    pub balance: u64,
+    pub earned: u64,
+    pub spent: u64,
+}
+
 /// A handle to the durable database. Cheaply cloneable (shared `Arc`).
 #[derive(Clone)]
 pub struct Store {
