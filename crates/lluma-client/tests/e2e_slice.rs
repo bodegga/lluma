@@ -30,8 +30,9 @@ const PROMPT_SENTINEL: &[u8] = b"PROMPT-CANARY-3f9a2b7c1d";
 const RESPONSE_SENTINEL: &[u8] = b"RESPONSE-CANARY-8e1d0c4a::";
 
 // ---- recorder ----
+type Transcript = (String, Vec<u8>, Vec<u8>);
 #[derive(Clone)]
-struct Rec(Arc<Mutex<Vec<(String, Vec<u8>, Vec<u8>)>>>);
+struct Rec(Arc<Mutex<Vec<Transcript>>>);
 impl Rec {
     fn new() -> Self {
         Rec(Arc::new(Mutex::new(Vec::new())))
