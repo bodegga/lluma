@@ -76,6 +76,29 @@ async fn handle(State(st): State<GwState>, body: Bytes) -> Response {
     }
 }
 
+/// Anchored SSRF allowlist check. The path must be absolute, free of
+/// query/fragment, and contain no empty/`.`/`..` segments (defeating traversal
+/// bypasses like `/v1/issue/../admin/grant`); it must then either equal an
+/// allowlisted prefix exactly or extend it at a `/` segment boundary (so
+/// `/v1/issuex` does NOT match `/v1/issue`).
+fn path_allowed(path: &str, prefixes: &[String]) -> bool {
+    if !path.starts_with('/') || path.contains(['?', '#']) {
+        return false;
+    }
+    if path[1..]
+        .split('/')
+        .any(|seg| seg.is_empty() || seg == "." || seg == "..")
+    {
+        return false;
+    }
+    prefixes.iter().any(|p| {
+        path == p.as_str()
+            || path
+                .strip_prefix(p.as_str())
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
+}
+
 async fn process(st: &GwState, body: &Bytes) -> Result<Vec<u8>, GatewayError> {
     // 1. Decapsulate the client capsule (we hold the HPKE secret).
     let capsule = EncapsulatedRequest(body.to_vec());
@@ -98,12 +121,18 @@ async fn process(st: &GwState, body: &Bytes) -> Result<Vec<u8>, GatewayError> {
         .map(|p| p.to_string())
         .ok_or(GatewayError::BadRequest)?;
 
-    // 3. SSRF guard: fixed method set, path-prefix allowlist, authority ignored
-    //    (we build the URL from the CONFIGURED origin, never the inner request).
+    // 3. SSRF guard: fixed method set + anchored path allowlist. The path MUST
+    //    be absolute and contain no traversal (`.`/`..`) or empty segments — a
+    //    bare `starts_with` prefix check is unsafe (`/v1/issue/../admin/grant`
+    //    prefix-matches `/v1/issue` yet normalizes to `/v1/admin/grant`
+    //    upstream). Allowlist match requires an exact hit or a `/` segment
+    //    boundary; query/fragment-bearing paths are rejected (our endpoints use
+    //    none). Authority is never taken from the inner request — the URL is
+    //    built from the CONFIGURED origin.
     if method != "GET" && method != "POST" {
         return Err(GatewayError::Forbidden);
     }
-    if !st.prefixes.iter().any(|p| path.starts_with(p.as_str())) {
+    if !path_allowed(&path, &st.prefixes) {
         return Err(GatewayError::Forbidden);
     }
 
@@ -139,4 +168,58 @@ async fn process(st: &GwState, body: &Bytes) -> Result<Vec<u8>, GatewayError> {
 
     lluma_crypto::ohttp::ohttp_seal_chunk(&mut resp_ctx, &resp_bhttp, true)
         .map_err(|_| GatewayError::Seal)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::path_allowed;
+
+    fn prefixes() -> Vec<String> {
+        vec!["/v1/issue".into(), "/v1/redeem".into(), "/v1/key-config".into()]
+    }
+
+    #[test]
+    fn allows_exact_endpoints() {
+        let p = prefixes();
+        assert!(path_allowed("/v1/issue", &p));
+        assert!(path_allowed("/v1/redeem", &p));
+        assert!(path_allowed("/v1/key-config", &p));
+    }
+
+    #[test]
+    fn blocks_disallowed_sibling() {
+        assert!(!path_allowed("/v1/admin/grant", &prefixes()));
+    }
+
+    #[test]
+    fn blocks_traversal_bypass() {
+        // The finding: prefix-matches "/v1/issue" but normalizes to admin/grant.
+        assert!(!path_allowed("/v1/issue/../admin/grant", &prefixes()));
+        assert!(!path_allowed("/v1/issue/..", &prefixes()));
+        assert!(!path_allowed("/v1/./issue", &prefixes()));
+    }
+
+    #[test]
+    fn blocks_suffix_bypass() {
+        // "/v1/issuex" must not match the "/v1/issue" prefix (needs a boundary).
+        assert!(!path_allowed("/v1/issuex", &prefixes()));
+        assert!(!path_allowed("/v1/issue-evil", &prefixes()));
+    }
+
+    #[test]
+    fn blocks_query_fragment_empty_and_relative() {
+        let p = prefixes();
+        assert!(!path_allowed("/v1/issue?x=1", &p));
+        assert!(!path_allowed("/v1/issue#frag", &p));
+        assert!(!path_allowed("/v1//issue", &p));
+        assert!(!path_allowed("v1/issue", &p));
+        assert!(!path_allowed("/etc/passwd", &p));
+    }
+
+    #[test]
+    fn allows_subpath_at_boundary() {
+        // Sub-paths under an allowed prefix are permitted (they simply 404 at the
+        // origin); the security property is that disallowed siblings are blocked.
+        assert!(path_allowed("/v1/issue/batch", &prefixes()));
+    }
 }
