@@ -1,12 +1,32 @@
-//! The issue-request idempotency cache. Lets a client replay a flopped
-//! `/issue` request (same `(account, request_id, blinded_batch_hash)`) and
-//! receive the **already-issued** signatures without being re-debited, while a
-//! replay of `(account, request_id)` with a *different* `blinded_batch_hash`
-//! is rejected as a conflict (spec §5.3).
+//! The issue-request idempotency cache with **reserve-on-lookup** semantics.
 //!
-//! Privacy invariant: keyed by `AccountId` (the BLAKE3 fingerprint of the
-//! account pubkey — never the raw key) and `request_id` (32 B nonce). No
-//! prompt plaintext, no originator IP, no raw account bytes transit this cache.
+//! A client may replay a flopped `/issue` request (same
+//! `(account, request_id, blinded_batch_hash)`) and receive the
+//! **already-issued** signatures without being re-debited; a replay of
+//! `(account, request_id)` with a *different* `blinded_batch_hash` is a conflict
+//! (spec §5.3).
+//!
+//! ## Why reserve-on-lookup (concurrency safety — Fable review I-1)
+//!
+//! A plain "lookup returns Fresh, release the lock, then debit+sign+store" is
+//! racy: two identical requests interleaved on axum's multi-threaded runtime
+//! both observe `Fresh`, both debit, both sign — the account is debited twice.
+//! `begin` closes that window: under a SINGLE lock acquisition it either finds a
+//! prior result (`Replay`/`Conflict`), finds an in-flight reservation
+//! (`InFlight`), or **inserts a `Pending` reservation and returns `Reserved`**.
+//! Only the caller who gets `Reserved` proceeds to debit+sign; concurrent
+//! duplicates get `InFlight` and never debit. `store` flips the reservation to
+//! `Done`; `release` removes it if the reserved caller fails (debit/sign) so a
+//! legitimate later retry is not permanently poisoned.
+//!
+//! Privacy invariant: keyed by `AccountId` (BLAKE3 fingerprint of the account
+//! pubkey — never the raw key) and `request_id` (32 B nonce). No prompt
+//! plaintext, no originator IP, no raw account bytes transit this cache.
+//!
+//! Growth: entries accrete for the process lifetime — the ±10-min `ts_unix_s`
+//! window bounds *replayability*, NOT memory (a stale request is rejected before
+//! `begin`, but entries already inserted are never swept here). Real TTL
+//! eviction is a #4 (broker) concern.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -14,25 +34,31 @@ use std::sync::Mutex;
 use lluma_core::proto::v1::IssueResponse;
 use lluma_core::wire::AccountId;
 
-/// Result of an idempotency lookup.
+/// Outcome of reserving the `(account, request_id)` slot via [`IssueIdempotencyCache::begin`].
 #[derive(Debug)]
-pub enum IdemLookup {
-    /// Never seen this `(account, request_id)` — proceed with issuance.
-    Fresh,
-    /// Seen with the SAME `batch_hash` — replay the stored response (no debit).
+pub enum BeginOutcome {
+    /// Slot was free and is now reserved (`Pending`) for the caller — proceed
+    /// to debit + sign + `store`.
+    Reserved,
+    /// A completed response exists for the SAME `batch_hash` — hand it back with
+    /// no debit.
     Replay(IssueResponse),
-    /// Seen with a DIFFERENT `batch_hash` — reject as conflict.
+    /// Same `(account, request_id)` seen with a DIFFERENT `batch_hash`.
     Conflict,
+    /// Same `(account, request_id, batch_hash)` is currently being processed by
+    /// another task (its reservation is still `Pending`).
+    InFlight,
 }
 
-/// Stored entry: the `batch_hash` the response was issued under, plus the
-/// response itself. (`key_id` is part of `IssueResponse`.)
-type Entry = ([u8; 32], IssueResponse);
+/// A slot is either reserved-and-in-progress or completed.
+enum Entry {
+    /// Reserved with this `batch_hash`; response not yet stored.
+    Pending([u8; 32]),
+    /// Completed: the `batch_hash` it was issued under, plus the response.
+    Done([u8; 32], IssueResponse),
+}
 
 /// In-memory idempotency cache. Phase 1 only — #4 adds real TTL eviction.
-/// For now, growth is bounded by the ±10-min `ts_unix_s` window enforced in
-/// the Task 7 handler (stale requests are rejected before `lookup`), so the
-/// map need only hold the last ~10 minutes of issued batches.
 pub struct IssueIdempotencyCache {
     inner: Mutex<HashMap<(AccountId, [u8; 32]), Entry>>,
 }
@@ -44,37 +70,38 @@ impl IssueIdempotencyCache {
         }
     }
 
-    /// Look up `(account, request_id)`. `batch_hash` is the candidate batch the
-    /// caller is about to issue; it is compared against the stored hash to
-    /// distinguish an exact replay from a same-request-id/different-batch
-    /// conflict.
-    pub fn lookup(
+    /// Atomically inspect-and-reserve `(account, request_id)` in one critical
+    /// section (see the module docs for why this must be one lock acquisition).
+    pub fn begin(
         &self,
         account: &AccountId,
         request_id: &[u8; 32],
         batch_hash: &[u8; 32],
-    ) -> IdemLookup {
-        let guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+    ) -> BeginOutcome {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         match guard.get(&(*account, *request_id)) {
-            None => IdemLookup::Fresh,
-            Some((stored_hash, resp)) => {
-                if stored_hash == batch_hash {
-                    // Clone the stored response so the caller can hand it back
-                    // to the client without re-running `token_issue` or
-                    // re-debiting the ledger.
-                    IdemLookup::Replay(resp.clone())
+            None => {
+                guard.insert((*account, *request_id), Entry::Pending(*batch_hash));
+                BeginOutcome::Reserved
+            }
+            Some(Entry::Pending(h)) => {
+                if h == batch_hash {
+                    BeginOutcome::InFlight
                 } else {
-                    IdemLookup::Conflict
+                    BeginOutcome::Conflict
+                }
+            }
+            Some(Entry::Done(h, resp)) => {
+                if h == batch_hash {
+                    BeginOutcome::Replay(resp.clone())
+                } else {
+                    BeginOutcome::Conflict
                 }
             }
         }
     }
 
-    /// Record a completed response under `(account, request_id, batch_hash)`.
-    /// Overwrites any prior entry for the same `(account, request_id)` — but
-    /// the handler's `lookup`-then-`store` discipline (Task 7) guarantees we
-    /// only `store` after a `Fresh` `lookup`, so a conflicting replay hits the
-    /// `Conflict` branch before reaching here.
+    /// Flip a reservation to `Done`, recording the completed response.
     pub fn store(
         &self,
         account: &AccountId,
@@ -83,7 +110,14 @@ impl IssueIdempotencyCache {
         resp: IssueResponse,
     ) {
         let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
-        guard.insert((*account, request_id), (batch_hash, resp));
+        guard.insert((*account, request_id), Entry::Done(batch_hash, resp));
+    }
+
+    /// Remove a reservation — call after a post-`Reserved` failure (debit
+    /// rejected, sign failed) so a legitimate retry stays fresh.
+    pub fn release(&self, account: &AccountId, request_id: &[u8; 32]) {
+        let mut guard = self.inner.lock().unwrap_or_else(|e| e.into_inner());
+        guard.remove(&(*account, *request_id));
     }
 }
 
@@ -109,77 +143,90 @@ mod tests {
         }
     }
 
-    fn signatures_match(a: &IssueResponse, b: &IssueResponse) -> bool {
-        if a.key_id != b.key_id || a.signatures.len() != b.signatures.len() {
-            return false;
-        }
-        a.signatures
-            .iter()
-            .zip(b.signatures.iter())
-            .all(|(x, y)| x.0 == y.0)
+    fn sigs_eq(a: &IssueResponse, b: &IssueResponse) -> bool {
+        a.key_id == b.key_id
+            && a.signatures.len() == b.signatures.len()
+            && a.signatures.iter().zip(&b.signatures).all(|(x, y)| x.0 == y.0)
     }
 
     #[test]
-    fn unseen_is_fresh() {
+    fn unseen_reserves() {
         let c = IssueIdempotencyCache::new();
-        let r = c.lookup(&aid(1), &[2u8; 32], &[3u8; 32]);
-        assert!(matches!(r, IdemLookup::Fresh));
+        assert!(matches!(
+            c.begin(&aid(1), &[2u8; 32], &[3u8; 32]),
+            BeginOutcome::Reserved
+        ));
+    }
+
+    #[test]
+    fn second_begin_same_triple_is_in_flight_until_stored() {
+        let c = IssueIdempotencyCache::new();
+        let (a, r, h) = (aid(1), [2u8; 32], [3u8; 32]);
+        assert!(matches!(c.begin(&a, &r, &h), BeginOutcome::Reserved));
+        // Reserved but not yet stored → a concurrent duplicate is InFlight.
+        assert!(matches!(c.begin(&a, &r, &h), BeginOutcome::InFlight));
     }
 
     #[test]
     fn store_then_same_triple_is_replay_with_equal_signatures() {
         let c = IssueIdempotencyCache::new();
-        let account = aid(1);
-        let request_id = [2u8; 32];
-        let batch_hash = [3u8; 32];
-        c.store(&account, request_id, batch_hash, resp(7, 3));
-
-        let r = c.lookup(&account, &request_id, &batch_hash);
-        match r {
-            IdemLookup::Replay(got) => assert!(signatures_match(&got, &resp(7, 3))),
+        let (a, r, h) = (aid(1), [2u8; 32], [3u8; 32]);
+        assert!(matches!(c.begin(&a, &r, &h), BeginOutcome::Reserved));
+        c.store(&a, r, h, resp(7, 3));
+        match c.begin(&a, &r, &h) {
+            BeginOutcome::Replay(got) => assert!(sigs_eq(&got, &resp(7, 3))),
             other => panic!("expected Replay, got {other:?}"),
         }
     }
 
     #[test]
-    fn same_account_request_id_different_hash_is_conflict() {
+    fn different_hash_is_conflict_pending_or_done() {
         let c = IssueIdempotencyCache::new();
-        let account = aid(1);
-        let request_id = [2u8; 32];
-        let batch_hash = [3u8; 32];
-        c.store(&account, request_id, batch_hash, resp(7, 3));
-
-        let different_hash = [4u8; 32];
-        let r = c.lookup(&account, &request_id, &different_hash);
-        assert!(matches!(r, IdemLookup::Conflict));
-
-        // The original triple still replays — the conflicting lookup must NOT
-        // clobber the stored entry.
-        let r2 = c.lookup(&account, &request_id, &batch_hash);
-        assert!(matches!(r2, IdemLookup::Replay(_)));
+        let (a, r, h) = (aid(1), [2u8; 32], [3u8; 32]);
+        // While Pending: different hash → Conflict.
+        assert!(matches!(c.begin(&a, &r, &h), BeginOutcome::Reserved));
+        assert!(matches!(c.begin(&a, &r, &[9u8; 32]), BeginOutcome::Conflict));
+        // While Done: different hash → Conflict; same hash still replays.
+        c.store(&a, r, h, resp(7, 3));
+        assert!(matches!(c.begin(&a, &r, &[9u8; 32]), BeginOutcome::Conflict));
+        assert!(matches!(c.begin(&a, &r, &h), BeginOutcome::Replay(_)));
     }
 
     #[test]
-    fn different_account_same_request_id_is_fresh() {
+    fn release_frees_a_reservation() {
         let c = IssueIdempotencyCache::new();
-        let request_id = [2u8; 32];
-        let batch_hash = [3u8; 32];
-        c.store(&aid(1), request_id, batch_hash, resp(7, 1));
-
-        // Another account using the same `request_id` is independent — no
-        // cross-account idempotency coupling.
-        let r = c.lookup(&aid(2), &request_id, &batch_hash);
-        assert!(matches!(r, IdemLookup::Fresh));
+        let (a, r, h) = (aid(1), [2u8; 32], [3u8; 32]);
+        assert!(matches!(c.begin(&a, &r, &h), BeginOutcome::Reserved));
+        c.release(&a, &r);
+        // After release, the slot is free again.
+        assert!(matches!(c.begin(&a, &r, &h), BeginOutcome::Reserved));
     }
 
     #[test]
-    fn different_request_id_same_account_is_fresh() {
+    fn different_account_same_request_id_is_independent() {
         let c = IssueIdempotencyCache::new();
-        let account = aid(1);
-        let batch_hash = [3u8; 32];
-        c.store(&account, [2u8; 32], batch_hash, resp(7, 1));
+        let (r, h) = ([2u8; 32], [3u8; 32]);
+        assert!(matches!(c.begin(&aid(1), &r, &h), BeginOutcome::Reserved));
+        assert!(matches!(c.begin(&aid(2), &r, &h), BeginOutcome::Reserved));
+    }
 
-        let r = c.lookup(&account, &[9u8; 32], &batch_hash);
-        assert!(matches!(r, IdemLookup::Fresh));
+    #[test]
+    fn concurrent_begins_yield_exactly_one_reserved() {
+        use std::sync::Arc;
+        let c = Arc::new(IssueIdempotencyCache::new());
+        let (a, r, h) = (aid(5), [6u8; 32], [7u8; 32]);
+        let mut handles = Vec::new();
+        for _ in 0..16 {
+            let c = c.clone();
+            handles.push(std::thread::spawn(move || {
+                matches!(c.begin(&a, &r, &h), BeginOutcome::Reserved)
+            }));
+        }
+        let reserved = handles
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .filter(|&ok| ok)
+            .count();
+        assert_eq!(reserved, 1, "exactly one concurrent begin may reserve the slot");
     }
 }

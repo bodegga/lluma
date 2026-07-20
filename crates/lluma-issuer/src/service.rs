@@ -26,7 +26,7 @@ use lluma_core::proto::v1::{
     GrantRequest, IssueRequest, IssueResponse, KeyConfigResponse, RedeemRequest, RedeemResponse,
     DENOMINATION,
 };
-use lluma_core::wire::{AccountPublicKey, AccountId};
+use lluma_core::wire::{AccountId, AccountPublicKey};
 
 use crate::idem::IssueIdempotencyCache;
 use crate::keys::EpochKeys;
@@ -155,19 +155,31 @@ async fn issue(
         req.body.account.to_vec(),
     ));
 
-    // Step 8: idempotency replay/conflict check.
-    match state.idem.lookup(&account_id, &req.body.request_id, &req.body.blinded_batch_hash) {
-        crate::idem::IdemLookup::Replay(r) => return Ok(Json(r)),
-        crate::idem::IdemLookup::Conflict => return Err(IssuerError::RequestIdConflict),
-        crate::idem::IdemLookup::Fresh => {}
+    // Step 8: idempotency — atomically reserve the (account, request_id) slot.
+    // Reserve-on-lookup closes the concurrent-identical-request double-debit
+    // race (two requests both seeing "fresh" and both debiting).
+    match state
+        .idem
+        .begin(&account_id, &req.body.request_id, &req.body.blinded_batch_hash)
+    {
+        crate::idem::BeginOutcome::Replay(r) => return Ok(Json(r)),
+        crate::idem::BeginOutcome::Conflict => return Err(IssuerError::RequestIdConflict),
+        crate::idem::BeginOutcome::InFlight => return Err(IssuerError::Concurrent),
+        crate::idem::BeginOutcome::Reserved => {}
     }
 
     // Step 9: debit credits atomically. Amount = batch size (single denomination).
+    // On failure, release the reservation so a legitimate retry (e.g. after the
+    // account tops up credits) is not permanently poisoned.
     let amount = req.blinded.len() as u64;
-    state.ledger.debit(&account_id, amount)?;
+    if let Err(e) = state.ledger.debit(&account_id, amount) {
+        state.idem.release(&account_id, &req.body.request_id);
+        return Err(e);
+    }
 
     // Step 10: blind-sign each blinded token in order. On any failure, refund
-    // the just-debited credits and return Internal (never surface crypto detail).
+    // the just-debited credits, release the reservation, and return Internal
+    // (never surface crypto detail).
     let mut rng = blind_rsa_signatures::DefaultRng;
     let mut signatures = Vec::with_capacity(req.blinded.len());
     for b in &req.blinded {
@@ -175,6 +187,7 @@ async fn issue(
             Ok(sig) => signatures.push(sig),
             Err(_) => {
                 state.ledger.grant(&account_id, amount);
+                state.idem.release(&account_id, &req.body.request_id);
                 return Err(IssuerError::Internal);
             }
         }

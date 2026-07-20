@@ -48,7 +48,7 @@ use lluma_issuer::spent_set::{InMemorySpentSet, SpentSet};
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Initialize the tracing fmt subscriber. The default subscriber does NOT
     // log request/response bodies — only the spans/events the application
-    // emits. The issuer's handlers emit no body events (L8 invarint).
+    // emits. The issuer's handlers emit no body events (L8 invariant).
     tracing_subscriber::fmt()
         .with_target(true)
         .with_level(true)

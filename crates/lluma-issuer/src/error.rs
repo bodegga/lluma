@@ -26,6 +26,8 @@ pub enum IssuerError {
     BadRequest,
     #[error("internal error")]
     Internal,
+    #[error("concurrent request")]
+    Concurrent,
 }
 
 impl IssuerError {
@@ -40,6 +42,7 @@ impl IssuerError {
             IssuerError::RequestIdConflict => "request_id_conflict",
             IssuerError::BadRequest => "bad_request",
             IssuerError::Internal => "internal",
+            IssuerError::Concurrent => "concurrent_request",
         }
     }
 
@@ -53,6 +56,7 @@ impl IssuerError {
             IssuerError::RequestIdConflict => 409,
             IssuerError::BadRequest => 422,
             IssuerError::Internal => 500,
+            IssuerError::Concurrent => 503,
         }
     }
 }
@@ -112,6 +116,12 @@ mod tests {
     fn internal_maps_500() {
         assert_eq!(IssuerError::Internal.status(), 500);
         assert_eq!(IssuerError::Internal.code(), "internal");
+    }
+
+    #[test]
+    fn concurrent_maps_503() {
+        assert_eq!(IssuerError::Concurrent.status(), 503);
+        assert_eq!(IssuerError::Concurrent.code(), "concurrent_request");
     }
 
     #[test]

@@ -333,6 +333,9 @@ async fn unlinkability_two_account_interleaved() {
             issue_windows.insert(w.try_into().expect("8"));
         }
     }
+    // M-4: guard against a vacuous sweep if extraction silently broke.
+    assert!(!issue_windows.is_empty(), "sweep A vacuous: no issue-side windows extracted");
+    assert!(!redeem_blobs.is_empty(), "sweep A vacuous: no redeem-side blobs extracted");
     for blob in &redeem_blobs {
         for w in blob.windows(8) {
             let arr: [u8; 8] = w.try_into().expect("8");
@@ -355,8 +358,37 @@ async fn unlinkability_two_account_interleaved() {
         }
     }
 
-    // (C) Structural: no redeem transcript carries either account's identity
-    // (pubkey, account_id) or either issue-time auth signature.
+    // (C) Structural (encoding-aware — Fable review I-2): the /redeem wire
+    // objects must carry ONLY the protocol fields. A raw-byte search misses a
+    // smuggled field (it would be a JSON int-array / base64), and the typed
+    // sweeps (A)/(B) miss it too because serde drops unknown keys — so assert
+    // the exact JSON key set of every /redeem request and response.
+    use std::collections::BTreeSet;
+    let want_req: BTreeSet<&str> = ["key_id", "token"].into_iter().collect();
+    let want_resp: BTreeSet<&str> = ["spend_id"].into_iter().collect();
+    for (_, reqb, status, respb) in &redeem_t {
+        let rv: serde_json::Value = serde_json::from_slice(reqb).expect("redeem req json");
+        let got: BTreeSet<&str> = rv
+            .as_object()
+            .expect("redeem req is a JSON object")
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(got, want_req, "redeem request must carry exactly {{key_id, token}}");
+        if *status == 200 {
+            let sv: serde_json::Value = serde_json::from_slice(respb).expect("redeem resp json");
+            let gotr: BTreeSet<&str> = sv
+                .as_object()
+                .expect("redeem resp is a JSON object")
+                .keys()
+                .map(String::as_str)
+                .collect();
+            assert_eq!(gotr, want_resp, "redeem response must carry exactly {{spend_id}}");
+        }
+    }
+
+    // (C-raw) Belt-and-suspenders: also byte-scan redeem transcripts for raw
+    // identity material (pubkey, account_id, auth_sig).
     let mut identity_needles: Vec<Vec<u8>> = vec![
         pka.0.clone(),
         pkb.0.clone(),
@@ -611,4 +643,38 @@ async fn restart_respend_hole() {
     let mut tmp = path.clone();
     tmp.set_extension("tmp");
     let _ = std::fs::remove_file(&tmp);
+}
+
+#[tokio::test]
+async fn concurrent_identical_issue_debits_once() {
+    // Fable review I-1: two identical /issue requests fired concurrently must
+    // debit the account exactly once (reserve-on-lookup). The idem.rs unit test
+    // `concurrent_begins_yield_exactly_one_reserved` proves the primitive; this
+    // corroborates it end-to-end over the wire.
+    let state = make_state();
+    let base = spawn(state.clone(), Recorder::new()).await;
+    let (sk, pk) = account(9);
+    let id = fingerprint(&pk);
+    grant(&base, id, 10).await;
+    let kc = IssuerClient::new(&base).fetch_key_config().await.expect("kc");
+
+    let req = build_issue(&kc, &sk, &pk, 3, [42u8; 32], real_now());
+    let (b1, b2) = (base.clone(), base.clone());
+    let (r1, r2) = (req.clone(), req.clone());
+    let (a, b) = tokio::join!(
+        async move { post_json(&b1, "/v1/issue", &r1).await },
+        async move { post_json(&b2, "/v1/issue", &r2).await },
+    );
+
+    // Debited exactly once regardless of interleaving: 10 - 3 = 7.
+    assert_eq!(
+        state.ledger.balance(&id),
+        7,
+        "concurrent identical /issue must debit only once"
+    );
+    let (s1, s2) = (a.0, b.0);
+    assert!(s1 == 200 || s2 == 200, "at least one concurrent issue must succeed");
+    for s in [s1, s2] {
+        assert!(s == 200 || s == 503, "concurrent issue status must be 200 or 503, got {s}");
+    }
 }

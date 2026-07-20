@@ -133,6 +133,7 @@ pub mod v1 {
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
     pub struct IssueRequest {
         pub body: IssueRequestBody,
         #[serde(with = "b64_blinded")]
@@ -149,6 +150,7 @@ pub mod v1 {
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
     pub struct RedeemRequest {
         pub key_id: [u8; 32],
         #[serde(with = "b64_token")]
@@ -161,6 +163,7 @@ pub mod v1 {
     }
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
     pub struct GrantRequest {
         pub account_id: AccountId,
         pub amount: u64,

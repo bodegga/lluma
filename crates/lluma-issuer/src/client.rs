@@ -63,6 +63,7 @@ fn map_code(code: &str) -> IssuerError {
         "double_spend" => IssuerError::DoubleSpend,
         "request_id_conflict" => IssuerError::RequestIdConflict,
         "bad_request" => IssuerError::BadRequest,
+        "concurrent_request" => IssuerError::Concurrent,
         _ => IssuerError::Internal,
     }
 }
@@ -255,6 +256,10 @@ impl RedeemClient {
     /// and return `spend_id`; on non-2xx map the server's `code` field to the
     /// matching `IssuerError`.
     pub async fn redeem(&self, key_id: [u8; 32], token: Token) -> Result<SpendId, IssuerError> {
+        // Recompute locally BEFORE moving `token` — never trust the server's
+        // echoed spend_id. A malicious issuer must not be able to substitute a
+        // different id (matters once spend_id enters the e2e AAD contract, #4/#5).
+        let want = lluma_crypto::tokens::token_spend_id(&token);
         let req = RedeemRequest { key_id, token };
         let body = serde_json::to_vec(&req).map_err(|_| IssuerError::Internal)?;
         let resp = self
@@ -268,7 +273,10 @@ impl RedeemClient {
         let bytes = into_body(resp).await?;
         let r: RedeemResponse =
             serde_json::from_slice(&bytes).map_err(|_| IssuerError::Internal)?;
-        Ok(r.spend_id)
+        if r.spend_id.0 != want.0 {
+            return Err(IssuerError::Internal);
+        }
+        Ok(want)
     }
 }
 
