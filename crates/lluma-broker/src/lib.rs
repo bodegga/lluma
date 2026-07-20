@@ -17,6 +17,7 @@ pub mod registry;
 pub mod service;
 pub mod spent;
 pub mod store;
+pub mod trial;
 
 pub use config::BrokerConfig;
 pub use error::BrokerError;
@@ -27,3 +28,4 @@ pub use registry::{heartbeat, register, HeartbeatOutcome, RegisterOutcome};
 pub use spent::RedbSpentSet;
 pub use service::{router, BrokerState};
 pub use store::Store;
+pub use trial::{grant_trial, TrialOutcome};
