@@ -1,0 +1,25 @@
+[package]
+name = "lluma-gateway"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lluma-gateway"
+path = "src/main.rs"
+
+[dependencies]
+lluma-core = { path = "../lluma-core" }
+lluma-crypto = { path = "../lluma-crypto" }
+bhttp = "0.8"
+axum = "0.7"
+tokio = { workspace = true }
+reqwest = { workspace = true }
+thiserror = { workspace = true }
+rand_core = { workspace = true }
+base64 = "0.22"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true }
