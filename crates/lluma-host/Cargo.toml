@@ -1,0 +1,25 @@
+[package]
+name = "lluma-host"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "lluma-host"
+path = "src/main.rs"
+
+[dependencies]
+lluma-core = { path = "../lluma-core" }
+lluma-crypto = { path = "../lluma-crypto" }
+axum = "0.7"
+tokio = { workspace = true }
+serde_json = { workspace = true }
+rand_core = { workspace = true }
+base64 = "0.22"
+thiserror = { workspace = true }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[dev-dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
