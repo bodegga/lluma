@@ -12,4 +12,7 @@ pub mod ledger;
 pub mod service;
 pub mod spent_set;
 
+#[cfg(feature = "client")]
+pub mod client;
+
 pub use error::IssuerError;
