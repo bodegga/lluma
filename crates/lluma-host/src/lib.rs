@@ -84,10 +84,14 @@ async fn exec(State(st): State<HostState>, body: Bytes) -> Response {
         Ok(c) => c,
         Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     };
+    let body = match serde_json::to_vec(&ExecResponse { preamble, chunk }) {
+        Ok(b) => b,
+        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+    };
     (
         StatusCode::OK,
         [(header::CONTENT_TYPE, "application/json")],
-        serde_json::to_vec(&ExecResponse { preamble, chunk }).unwrap_or_default(),
+        body,
     )
         .into_response()
 }

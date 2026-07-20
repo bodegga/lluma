@@ -10,6 +10,7 @@
 use std::sync::{Arc, Mutex};
 
 use axum::Router;
+use base64::Engine;
 use tokio::net::TcpListener;
 
 use lluma_broker::{router as broker_router, BrokerState, HostEntry, RedbSpentSet, StaticHostDirectory, Store};
@@ -207,6 +208,22 @@ async fn anonymous_request_reaches_model_and_returns_invariant_holds() {
     // clear there either (decryption is internal to the handler).
     assert!(!host_rec.contains(RESPONSE_SENTINEL), "host wire bytes must be sealed (no response plaintext on the wire)");
 
+    // Non-vacuity: recorders captured traffic, and a POSITIVE control proves the
+    // scanner can see known cleartext (the origin genuinely receives the token
+    // base64 in the ExecRequest body) — so the negative assertions above bite.
+    assert!(relay_rec.hits() >= 3, "relay saw key-config + issue + exec");
+    assert!(gw_rec.hits() >= 3, "gateway saw key-config + issue + exec");
+    assert!(origin_rec.hits() >= 4, "origin saw grant + key-config + issue + exec");
+    let tok_b64 = base64::engine::general_purpose::STANDARD
+        .encode(&token.0)
+        .into_bytes();
+    assert!(origin_rec.contains(&tok_b64), "positive control: origin receives the token base64 (scanner works)");
+
+    // Host negatives (non-vacuous given the positive control): the host never
+    // receives the token, and its wire bytes are sealed (prompt only in-handler).
+    assert!(!host_rec.contains(&tok_b64), "host must never receive the token");
+    assert!(!host_rec.contains(PROMPT_SENTINEL), "host wire bytes are sealed");
+
     // Connection graph: the host's only inbound peer is the broker — the client
     // never reaches it. By construction the client holds only the relay URL and
     // the host URL lives only in the broker's directory. The host was hit once.
@@ -214,6 +231,9 @@ async fn anonymous_request_reaches_model_and_returns_invariant_holds() {
 
     // ---- replay: the same token must be refused AND never reach the host ----
     let replay = client.exec(&kc, token, PROMPT_SENTINEL).await;
-    assert!(replay.is_err(), "replayed token must be rejected");
+    assert!(
+        matches!(replay, Err(lluma_client::ClientError::Server(409))),
+        "replayed token must be refused with 409 double_spend"
+    );
     assert_eq!(host_rec.hits(), 1, "double-spend must not reach the host");
 }

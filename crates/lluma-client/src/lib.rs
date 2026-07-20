@@ -140,7 +140,7 @@ impl Client {
         }
         let ir: IssueResponse =
             serde_json::from_slice(&resp.body).map_err(|_| ClientError::Protocol)?;
-        if ir.signatures.len() != states.len() {
+        if ir.key_id != kc.key_id || ir.signatures.len() != states.len() {
             return Err(ClientError::Protocol);
         }
         let mut tokens = Vec::with_capacity(states.len());

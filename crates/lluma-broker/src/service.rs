@@ -43,7 +43,13 @@ impl BrokerState {
             key_id,
             spent,
             hosts: Arc::new(hosts),
-            http: reqwest::Client::new(),
+            // Bounded timeouts: a hung host must not pin an exec forever after
+            // the token is already durably spent (Fable review).
+            http: reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(30))
+                .connect_timeout(std::time::Duration::from_secs(5))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
         }
     }
 }

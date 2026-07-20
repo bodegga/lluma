@@ -18,5 +18,12 @@ PoW registration / slow admission / signed snapshots / heartbeats; matchmaking (
 ## Honest caveats
 (a) A localhost test cannot show real network unlinkability or timing-side-channel resistance. (b) The echo stub means "reaches a model" is architecturally true, not commercially true. (c) A single static host leaks nothing *because there is no selection* — matchmaking MUST be re-reviewed for linkage when built (#4 full).
 
+## Leak-register carry-forwards (from Fable's slice review)
+- **Issue→spend temporal correlation:** the service sees the account at `/v1/issue` and the token seconds later at `/v1/exec` over the same relay session; service+host collusion could link account↔prompt by timing (blinding protects *content* linkage only). Mitigate in #5: pre-acquired token pools + randomized spend delay. (The slice client spends immediately — worst case.)
+- **Bearer-token visibility at the gateway** (post-decapsulation): a malicious gateway/broker can steal+burn a token (theft/DoS within the service trust domain, not IP↔prompt linkage). Standard Privacy Pass bearer semantics; revisit key-bound tokens if gateway and broker are ever separate operators.
+- **Size/timing side channel:** sealed request/response lengths correlate with prompt/answer lengths per spend_id — padding policy needed in #5.
+- **Full-#4 items:** never mount issuer `/v1/redeem` on a merged origin (two live spent-sets = respend hole); make `CreditLedger::grant` fallible before receipt-crediting depends on it; epoch-key the spent-set + prune at rotation.
+- **Token-lost-on-host-failure:** the broker spends before forwarding (correct — refund would allow double-execution); the fix is deferred host-side spend_id idempotency + broker retry of the identical `{spend_id, sealed}`, NOT a refund.
+
 ## Consequences
 The slice proves the privacy invariant end-to-end and gives a working skeleton to harden. The full #4 (registry/snapshots/receipts/anti-Sybil) and #5 (desktop, real inference) remain, tracked against their specs. This ADR is the forcing function that those deferrals are revisited, not forgotten.
