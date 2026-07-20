@@ -59,7 +59,7 @@ crates/lluma-gateway/    # bin + lib (deps: lluma-crypto, lluma-core, bhttp, axu
 // lluma-net
 pub struct Bootstrap { pub relay_urls: Vec<String>, pub key_config: OhttpKeyConfig,
                        pub key_id: u8, pub epoch: u64, pub not_after: u64 }
-pub fn verify_bootstrap(sources: &[&[u8]], vk: &ed25519_dalek::VerifyingKey) -> Result<Bootstrap, NetError>;
+pub fn verify_bootstrap(sources: &[&[u8]], vk: &ed25519_dalek::VerifyingKey, now_unix_s: u64) -> Result<Bootstrap, NetError>; // rejects now > not_after
 
 pub struct InnerRequest  { pub method: String, pub path: String,
                            pub content_type: Option<String>, pub body: Vec<u8> }  // -> BHTTP (RFC 9292)

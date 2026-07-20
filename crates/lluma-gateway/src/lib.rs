@@ -88,7 +88,13 @@ fn path_allowed(path: &str, prefixes: &[String]) -> bool {
     // and non-absolute paths. `path_allowed` validates the BHTTP-decoded bytes,
     // but reqwest re-parses the `format!`-built URL — so the two must be forced
     // to agree by refusing any byte that normalization would rewrite.
-    if !path.starts_with('/') || path.contains(['?', '#', '%', '\\']) {
+    if !path.starts_with('/')
+        || path.contains(['?', '#', '%', '\\'])
+        || path.bytes().any(|b| b < 0x21)
+    {
+        // `< 0x21` rejects SPACE and all control bytes — notably ASCII tab
+        // (0x09) and LF/CR (0x0a/0x0d), which the WHATWG URL parser strips
+        // before dot-segment removal (a `.\t.` segment would become `..`).
         return false;
     }
     // Reject empty (`//`), `.`, and `..` segments (literal traversal).
@@ -152,12 +158,21 @@ async fn process(st: &GwState, body: &Bytes) -> Result<Vec<u8>, GatewayError> {
     let content_type = msg.header().get(b"content-type").map(|v| v.to_vec());
     let inner_body = msg.content().to_vec();
 
-    // 4. Forward to the origin (authority overwritten with origin_url).
+    // 4. Forward to the origin (authority overwritten with origin_url). Re-parse
+    //    the URL and re-run the allowlist on the NORMALIZED path: reqwest's `url`
+    //    crate strips tab/LF/CR and collapses dot segments, so the bytes it
+    //    actually sends differ from the raw decoded path. Validating the parsed
+    //    path closes the entire normalization-mismatch class (Fable C1), not
+    //    just specific byte vectors.
     let url = format!("{}{}", st.origin_url, path);
+    let parsed = reqwest::Url::parse(&url).map_err(|_| GatewayError::Forbidden)?;
+    if !path_allowed(parsed.path(), &st.prefixes) {
+        return Err(GatewayError::Forbidden);
+    }
     let mut rb = if method == "GET" {
-        st.http.get(&url)
+        st.http.get(parsed)
     } else {
-        st.http.post(&url).body(inner_body)
+        st.http.post(parsed).body(inner_body)
     };
     if let Some(ct) = &content_type {
         rb = rb.header(header::CONTENT_TYPE, ct.clone());
@@ -222,6 +237,17 @@ mod tests {
         assert!(!path_allowed("/v1/issue/.%2e/admin", &p));
         assert!(!path_allowed("/v1/issue/\\../admin/grant", &p));
         assert!(!path_allowed("/v1/issue%2f..", &p));
+    }
+
+    #[test]
+    fn blocks_control_char_traversal() {
+        // WHATWG URL parsing strips tab/LF/CR before dot-segment removal, so a
+        // `.\t.` segment would normalize to `..`. Control bytes must be refused.
+        let p = prefixes();
+        assert!(!path_allowed("/v1/issue/.\t./admin/grant", &p));
+        assert!(!path_allowed("/v1/issue/.\n./admin/grant", &p));
+        assert!(!path_allowed("/v1/issue/.\r./admin/grant", &p));
+        assert!(!path_allowed("/v1/issue /x", &p));
     }
 
     #[test]
