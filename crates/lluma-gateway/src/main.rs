@@ -20,7 +20,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::process::exit(1);
     }
     let prefixes: Vec<String> = env::var("LLUMA_GATEWAY_PREFIXES")
-        .unwrap_or_else(|_| "/v1/".to_string())
+        .unwrap_or_else(|_| "/v1/issue,/v1/redeem,/v1/key-config".to_string())
         .split(',')
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())

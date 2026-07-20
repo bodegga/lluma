@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use axum::body::{Body, Bytes};
-use axum::extract::{ConnectInfo, State};
-use axum::http::{header, StatusCode};
+use axum::extract::{ConnectInfo, DefaultBodyLimit, State};
+use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::Router;
@@ -95,6 +95,7 @@ struct RelayState {
 /// `.into_make_service_with_connect_info::<SocketAddr>()` so the per-IP limiter
 /// can see the peer address.
 pub fn router(cfg: RelayConfig) -> Router {
+    let max_body = cfg.max_body_bytes;
     let state = RelayState {
         gateway_url: Arc::new(cfg.gateway_url),
         max_body_bytes: cfg.max_body_bytes,
@@ -106,6 +107,10 @@ pub fn router(cfg: RelayConfig) -> Router {
     Router::new()
         .route("/ohttp", post(ohttp))
         .route("/v1/bootstrap", get(bootstrap))
+        // Reject oversize BEFORE buffering the whole body (axum's default is
+        // 2 MiB; pin it to the configured cap). The explicit len check stays as
+        // a backstop.
+        .layer(DefaultBodyLimit::max(max_body))
         .with_state(state)
 }
 
@@ -115,6 +120,14 @@ fn allow(state: &RelayState, ip: IpAddr) -> bool {
     let now = Instant::now();
     let cap = state.per_ip.capacity as f64;
     let refill = state.per_ip.refill_per_sec as f64;
+    // Amortized eviction: forgetting a fully-refilled (idle) bucket is safe — it
+    // re-initializes at full capacity, identical behavior — and bounds memory
+    // against an IPv6 source-spoofing flood on the one IP-seeing party.
+    if g.len() > 100_000 {
+        g.retain(|_, b| {
+            (b.tokens + now.duration_since(b.last).as_secs_f64() * refill).min(cap) < cap
+        });
+    }
     let b = g.entry(ip).or_insert(Bucket { tokens: cap, last: now });
     let elapsed = now.duration_since(b.last).as_secs_f64();
     b.tokens = (b.tokens + elapsed * refill).min(cap);
@@ -130,8 +143,16 @@ fn allow(state: &RelayState, ip: IpAddr) -> bool {
 async fn ohttp(
     State(state): State<RelayState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     body: Bytes,
 ) -> Response {
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        != Some("message/ohttp-req")
+    {
+        return RelayError::BadContentType.into_response();
+    }
     if body.len() > state.max_body_bytes {
         return RelayError::PayloadTooLarge.into_response();
     }

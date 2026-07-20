@@ -82,9 +82,16 @@ async fn handle(State(st): State<GwState>, body: Bytes) -> Response {
 /// allowlisted prefix exactly or extend it at a `/` segment boundary (so
 /// `/v1/issuex` does NOT match `/v1/issue`).
 fn path_allowed(path: &str, prefixes: &[String]) -> bool {
-    if !path.starts_with('/') || path.contains(['?', '#']) {
+    // Reject anything the SENT-url normalizer (WHATWG / the `url` crate that
+    // reqwest uses) would re-interpret AFTER this check: percent-encoding
+    // (`%2e%2e` → `..`) and backslashes (rewritten to `/`), plus query/fragment
+    // and non-absolute paths. `path_allowed` validates the BHTTP-decoded bytes,
+    // but reqwest re-parses the `format!`-built URL — so the two must be forced
+    // to agree by refusing any byte that normalization would rewrite.
+    if !path.starts_with('/') || path.contains(['?', '#', '%', '\\']) {
         return false;
     }
+    // Reject empty (`//`), `.`, and `..` segments (literal traversal).
     if path[1..]
         .split('/')
         .any(|seg| seg.is_empty() || seg == "." || seg == "..")
@@ -92,10 +99,16 @@ fn path_allowed(path: &str, prefixes: &[String]) -> bool {
         return false;
     }
     prefixes.iter().any(|p| {
-        path == p.as_str()
-            || path
-                .strip_prefix(p.as_str())
-                .is_some_and(|rest| rest.starts_with('/'))
+        if p.ends_with('/') {
+            // A trailing-slash prefix ("/v1/") matches everything beneath it
+            // (the slash is the boundary).
+            path.starts_with(p.as_str())
+        } else {
+            path == p.as_str()
+                || path
+                    .strip_prefix(p.as_str())
+                    .is_some_and(|rest| rest.starts_with('/'))
+        }
     })
 }
 
@@ -197,6 +210,26 @@ mod tests {
         assert!(!path_allowed("/v1/issue/../admin/grant", &prefixes()));
         assert!(!path_allowed("/v1/issue/..", &prefixes()));
         assert!(!path_allowed("/v1/./issue", &prefixes()));
+    }
+
+    #[test]
+    fn blocks_percent_encoded_and_backslash_traversal() {
+        // Fable review C1: the url crate normalizes these AFTER path_allowed, so
+        // any '%' or '\' must be refused outright.
+        let p = prefixes();
+        assert!(!path_allowed("/v1/issue/%2e%2e/admin/grant", &p));
+        assert!(!path_allowed("/v1/issue/%2E%2E/admin/grant", &p));
+        assert!(!path_allowed("/v1/issue/.%2e/admin", &p));
+        assert!(!path_allowed("/v1/issue/\\../admin/grant", &p));
+        assert!(!path_allowed("/v1/issue%2f..", &p));
+    }
+
+    #[test]
+    fn trailing_slash_prefix_matches_beneath() {
+        let p = vec!["/v1/".to_string()];
+        assert!(path_allowed("/v1/issue", &p));
+        assert!(path_allowed("/v1/anything", &p));
+        assert!(!path_allowed("/v2/issue", &p));
     }
 
     #[test]

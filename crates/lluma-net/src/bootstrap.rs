@@ -48,7 +48,11 @@ pub fn sign_bootstrap(sk: &SigningKey, b: &Bootstrap) -> Result<Vec<u8>, NetErro
 /// Verify ≥2 byte-identical signed sources under the pinned publishing key.
 /// Fails closed on any signature failure, any decode failure, fewer than two
 /// sources, or a lack of a 2-source agreement (publisher equivocation).
-pub fn verify_bootstrap(sources: &[&[u8]], vk: &VerifyingKey) -> Result<Bootstrap, NetError> {
+pub fn verify_bootstrap(
+    sources: &[&[u8]],
+    vk: &VerifyingKey,
+    now_unix_s: u64,
+) -> Result<Bootstrap, NetError> {
     if sources.len() < 2 {
         return Err(NetError::Bootstrap);
     }
@@ -72,7 +76,12 @@ pub fn verify_bootstrap(sources: &[&[u8]], vk: &VerifyingKey) -> Result<Bootstra
     if agree < 2 {
         return Err(NetError::Bootstrap);
     }
-    postcard::from_bytes(first).map_err(|_| NetError::Bootstrap)
+    let bootstrap: Bootstrap = postcard::from_bytes(first).map_err(|_| NetError::Bootstrap)?;
+    // Freshness: refuse an expired bootstrap — it may pin a rotated/retired key.
+    if now_unix_s > bootstrap.not_after {
+        return Err(NetError::Bootstrap);
+    }
+    Ok(bootstrap)
 }
 
 #[cfg(test)]
@@ -100,8 +109,23 @@ mod tests {
         let vk = sk.verifying_key();
         let b = sample();
         let blob = sign_bootstrap(&sk, &b).unwrap();
-        let got = verify_bootstrap(&[&blob, &blob], &vk).unwrap();
+        let got = verify_bootstrap(&[&blob, &blob], &vk, 1_000).unwrap();
         assert_eq!(got, b);
+    }
+
+    #[test]
+    fn expired_bootstrap_fails_closed() {
+        let sk = key();
+        let vk = sk.verifying_key();
+        let mut b = sample();
+        b.not_after = 100;
+        let blob = sign_bootstrap(&sk, &b).unwrap();
+        // now past not_after → rejected; now before → ok.
+        assert!(matches!(
+            verify_bootstrap(&[&blob, &blob], &vk, 200),
+            Err(NetError::Bootstrap)
+        ));
+        assert!(verify_bootstrap(&[&blob, &blob], &vk, 50).is_ok());
     }
 
     #[test]
@@ -109,7 +133,7 @@ mod tests {
         let sk = key();
         let vk = sk.verifying_key();
         let blob = sign_bootstrap(&sk, &sample()).unwrap();
-        assert!(matches!(verify_bootstrap(&[&blob], &vk), Err(NetError::Bootstrap)));
+        assert!(matches!(verify_bootstrap(&[&blob], &vk, 1_000), Err(NetError::Bootstrap)));
     }
 
     #[test]
@@ -122,7 +146,7 @@ mod tests {
         let mut other = sample();
         other.key_id = 8;
         let b = sign_bootstrap(&sk, &other).unwrap();
-        assert!(matches!(verify_bootstrap(&[&a, &b], &vk), Err(NetError::Bootstrap)));
+        assert!(matches!(verify_bootstrap(&[&a, &b], &vk, 1_000), Err(NetError::Bootstrap)));
     }
 
     #[test]
@@ -131,7 +155,7 @@ mod tests {
         let blob = sign_bootstrap(&sk, &sample()).unwrap();
         let attacker_vk = SigningKey::from_bytes(&[9u8; 32]).verifying_key();
         assert!(matches!(
-            verify_bootstrap(&[&blob, &blob], &attacker_vk),
+            verify_bootstrap(&[&blob, &blob], &attacker_vk, 1_000),
             Err(NetError::Bootstrap)
         ));
     }
