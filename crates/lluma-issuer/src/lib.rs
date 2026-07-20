@@ -7,5 +7,6 @@
 
 pub mod error;
 pub mod ledger;
+pub mod spent_set;
 
 pub use error::IssuerError;
