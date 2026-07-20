@@ -34,6 +34,8 @@ pub enum IngestOutcome {
     /// A receipt for this `spend_id` was already credited (idempotent no-op).
     AlreadyCredited,
     UnknownHost,
+    /// Malformed DTO (shape/length) — distinct from a signature failure.
+    BadRequest,
     BadSignature,
     /// The `spend_id` was never burned (not present in the spent-set).
     NoBurnedSpend,
@@ -50,17 +52,19 @@ pub fn ingest(
     cfg: &BrokerConfig,
 ) -> Result<IngestOutcome, BrokerError> {
     if submit.validate().is_err() {
-        return Ok(IngestOutcome::BadSignature);
+        return Ok(IngestOutcome::BadRequest);
     }
     let body = &submit.body;
-    if body.units > cfg.units_audit_cap {
-        return Ok(IngestOutcome::OverCap);
-    }
     let host_pk = AccountPublicKey(body.host_account.to_vec());
     let sig = ReceiptSignature(submit.sig.clone());
-    // Verify the receipt signature (outside the txn — pure crypto, no store).
+    // Verify the signature FIRST — never act on unauthenticated body fields
+    // (Fable should-fix 4: verify-then-inspect).
     if lluma_crypto::account::receipt_verify(&host_pk, body, &sig).is_err() {
         return Ok(IngestOutcome::BadSignature);
+    }
+    // `units` is authenticated now; it is an audit bound only (never credited).
+    if body.units > cfg.units_audit_cap {
+        return Ok(IngestOutcome::OverCap);
     }
     let account_id = lluma_crypto::account::account_fingerprint(&host_pk);
 

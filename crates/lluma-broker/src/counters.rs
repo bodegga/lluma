@@ -8,7 +8,7 @@
 //! broker's redeem transaction (same write-txn as the `SPENT` insert); the redeem
 //! path refuses the moment `redeemed > issued`.
 
-use redb::{ReadableTable, WriteTransaction};
+use redb::{ReadableTable, ReadTransaction, WriteTransaction};
 
 use crate::error::BrokerError;
 use crate::store::{CounterRow, Store, COUNTERS};
@@ -65,9 +65,23 @@ pub fn note_redeem_txn(w: &WriteTransaction, epoch: u64) -> Result<bool, BrokerE
     Ok(ok)
 }
 
-/// Read the counter row for `epoch` (point-in-time).
+/// Read the counter row for `epoch` inside an open read transaction.
+fn read_ro(r: &ReadTransaction, epoch: u64) -> Result<CounterRow, BrokerError> {
+    let t = r.open_table(COUNTERS).map_err(|_| BrokerError::Storage)?;
+    let bytes = t
+        .get(epoch)
+        .map_err(|_| BrokerError::Storage)?
+        .map(|v| v.value().to_vec());
+    match bytes {
+        Some(b) => postcard::from_bytes(&b).map_err(|_| BrokerError::Storage),
+        None => Ok(CounterRow::default()),
+    }
+}
+
+/// Read the counter row for `epoch` (point-in-time). Uses a READ transaction so
+/// an operator dashboard poll never contends for the single global writer.
 pub fn read(store: &Store, epoch: u64) -> Result<CounterRow, BrokerError> {
-    store.with_write(|w| read_txn(w, epoch))
+    store.with_read(|r| read_ro(r, epoch))
 }
 
 /// Whether the `redeemed ≤ issued` invariant currently holds for `epoch`.

@@ -61,23 +61,40 @@ fn ingress_addr_ok(addr: &str, allow_loopback: bool) -> bool {
     if !matches!(url.scheme(), "http" | "https") {
         return false;
     }
-    let host = match url.host_str() {
+    let host_raw = match url.host_str() {
         Some(h) => h,
         None => return false,
     };
     if allow_loopback {
         return true;
     }
+    // Strip IPv6 brackets if present so an `[::ffff:10.0.0.1]` literal parses as
+    // an `IpAddr` rather than falling through to the hostname (allowed) branch.
+    let host = host_raw.trim_start_matches('[').trim_end_matches(']');
     match host.parse::<IpAddr>() {
         Ok(IpAddr::V4(v4)) => {
             !(v4.is_loopback() || v4.is_private() || v4.is_link_local() || v4.is_unspecified())
         }
         Ok(IpAddr::V6(v6)) => {
+            // IPv4-mapped (::ffff:a.b.c.d): classify by the embedded IPv4, else a
+            // mapped RFC1918/loopback/link-local literal would bypass the V6
+            // checks (its first segment is 0x0000). [Fable MF-A]
+            if let Some(v4) = v6.to_ipv4_mapped() {
+                return !(v4.is_loopback()
+                    || v4.is_private()
+                    || v4.is_link_local()
+                    || v4.is_unspecified());
+            }
             if v6.is_loopback() || v6.is_unspecified() {
                 return false;
             }
-            // Best-effort reject of ULA (fc00::/7) and link-local (fe80::/10);
-            // std lacks stable helpers for these.
+            // Deprecated IPv4-compatible (::a.b.c.d) is a known SSRF vector — any
+            // remaining `to_ipv4()` match is the compat form (mapped handled,
+            // ::/::1 handled) → reject conservatively.
+            if v6.to_ipv4().is_some() {
+                return false;
+            }
+            // ULA (fc00::/7) and link-local (fe80::/10) — std lacks stable helpers.
             let seg0 = v6.segments()[0];
             (seg0 & 0xfe00) != 0xfc00 && (seg0 & 0xffc0) != 0xfe80
         }
@@ -164,32 +181,52 @@ pub fn heartbeat(
         return Ok(HeartbeatOutcome::BadSignature);
     }
     let body = &req.body;
+    let key: &[u8] = &body.host_account;
+
+    // Cheap read-only prefilter: an unknown host is rejected WITHOUT taking the
+    // single global writer, so an unknown-key flood cannot starve redeem (R9).
+    let known = store.with_read(|r| {
+        let t = r.open_table(HOSTS).map_err(|_| BrokerError::Storage)?;
+        Ok(t.get(key).map_err(|_| BrokerError::Storage)?.is_some())
+    })?;
+    if !known {
+        return Ok(HeartbeatOutcome::UnknownHost);
+    }
+    // Verify the signature BEFORE taking the writer — a bad-sig flood costs a
+    // verify, not the write lock.
+    let pk = AccountPublicKey(body.host_account.to_vec());
+    let sig = ReceiptSignature(req.sig.clone());
+    if lluma_crypto::account::heartbeat_verify(&pk, body, &sig).is_err() {
+        return Ok(HeartbeatOutcome::BadSignature);
+    }
+
     store.with_write(|w| {
         let mut hosts = w.open_table(HOSTS).map_err(|_| BrokerError::Storage)?;
-        let key: &[u8] = &body.host_account;
-        // Prefilter: unknown key rejected before the expensive signature verify.
+        // Re-read under the writer (the host could have been evicted between the
+        // prefilter and here).
         let row_bytes = match hosts.get(key).map_err(|_| BrokerError::Storage)? {
             Some(v) => v.value().to_vec(),
             None => return Ok(HeartbeatOutcome::UnknownHost),
         };
-        let pk = AccountPublicKey(body.host_account.to_vec());
-        let sig = ReceiptSignature(req.sig.clone());
-        if lluma_crypto::account::heartbeat_verify(&pk, body, &sig).is_err() {
-            return Ok(HeartbeatOutcome::BadSignature);
-        }
         let mut row: HostRow =
             postcard::from_bytes(&row_bytes).map_err(|_| BrokerError::Storage)?;
         // Monotonic counter — a replayed or stale heartbeat is refused.
         if body.hb_counter <= row.hb_counter {
             return Ok(HeartbeatOutcome::Replay);
         }
+        // Slow admission has a TIME component (Fable should-fix 2): only advance
+        // when at least one interval has elapsed since the last heartbeat, so a
+        // burst of counters 1,2,3 at one instant cannot fast-track to active.
+        let elapsed = now_unix_s.saturating_sub(row.last_hb);
         row.hb_counter = body.hb_counter;
-        row.last_hb = now_unix_s;
         row.load_bucket = body.load_bucket;
-        row.admit_progress = row.admit_progress.saturating_add(1);
-        if row.admit_progress >= cfg.admission_m {
-            row.status = HOST_ACTIVE;
+        if elapsed >= cfg.heartbeat_interval_s {
+            row.admit_progress = row.admit_progress.saturating_add(1);
+            if row.admit_progress >= cfg.admission_m {
+                row.status = HOST_ACTIVE;
+            }
         }
+        row.last_hb = now_unix_s;
         let active = row.status == HOST_ACTIVE;
         let bytes = postcard::to_stdvec(&row).map_err(|_| BrokerError::Storage)?;
         hosts.insert(key, bytes.as_slice()).map_err(|_| BrokerError::Storage)?;
@@ -332,6 +369,37 @@ mod tests {
         // A public address is accepted under the same policy.
         let req2 = signed_register(4, "http://203.0.113.7:9000", &cfg);
         assert_eq!(register(&s, &req2, &cfg, 100).unwrap(), RegisterOutcome::Registered);
+    }
+
+    #[test]
+    fn ingress_ssrf_filter_rejects_internal_and_mapped_ipv6() {
+        // [Fable MF-A] IPv4-mapped IPv6 forms of internal addresses must NOT
+        // bypass the filter.
+        for bad in [
+            "http://[::ffff:127.0.0.1]:9000",
+            "http://[::ffff:10.0.0.1]:9000",
+            "http://[::ffff:169.254.169.254]:80",
+            "http://[::ffff:192.168.1.1]:9000",
+            "http://10.0.0.1:9000",
+            "http://127.0.0.1:9000",
+            "http://169.254.169.254:80",
+            "http://[::1]:9000",
+            "http://[fe80::1]:9000",
+            "http://[fc00::1]:9000",
+            "ftp://203.0.113.7:9000", // non-http scheme
+        ] {
+            assert!(!ingress_addr_ok(bad, false), "must reject {bad}");
+        }
+        // Public v4, global v6, and a hostname are allowed in prod.
+        for ok in [
+            "http://203.0.113.7:9000",
+            "https://[2001:db8::1]:9000",
+            "http://host.example.com:9000",
+        ] {
+            assert!(ingress_addr_ok(ok, false), "must allow {ok}");
+        }
+        // Under the loopback test flag, loopback is allowed.
+        assert!(ingress_addr_ok("http://127.0.0.1:9000", true));
     }
 
     #[test]
