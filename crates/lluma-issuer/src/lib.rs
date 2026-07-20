@@ -7,6 +7,7 @@
 
 pub mod error;
 pub mod idem;
+pub mod keys;
 pub mod ledger;
 pub mod spent_set;
 
