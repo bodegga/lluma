@@ -19,6 +19,7 @@ tracing = "0.1"
 blind-rsa-signatures = { workspace = true }
 base64 = "0.22"
 reqwest = { workspace = true, optional = true }
+tracing-subscriber = "0.3"
 
 [features]
 default = ["client"]
