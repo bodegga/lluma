@@ -6,6 +6,7 @@
 //! state layer; HTTP handlers land in Task 7+.
 
 pub mod error;
+pub mod idem;
 pub mod ledger;
 pub mod spent_set;
 
