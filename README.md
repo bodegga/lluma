@@ -52,8 +52,34 @@ cargo test -p lluma-core -p lluma-crypto -p lluma-issuer -p lluma-net -p lluma-r
 cargo clippy --all-targets --all-features -- -D warnings
 ```
 
-`lluma-runtime` (llama.cpp GGUF runner) and the Tauri desktop app require a **C toolchain**
-(`cc`/`clang` + cmake); build those on a machine that has one.
+Only `lluma-runtime` (the in-process llama.cpp GGUF runner) requires a **C toolchain**
+(`cc`/`clang` + cmake). The **desktop app builds without one** — see below.
+
+## Desktop client
+
+`apps/lluma-desktop` is a Tauri v2 thick client with four tabs — **Chat** (anonymous
+inference over the live relay), **Contribute** (run a serving host), **Status** (network +
+privacy explainer + balance), and **Settings** (endpoints + account). Chat and hosting both
+run on the pure-Rust path (`lluma-client` / `lluma-host`); in-process llama.cpp is an optional
+`local-inference` feature, off by default.
+
+```bash
+# from the app's own workspace (it is standalone, not a root workspace member):
+cd apps/lluma-desktop/src-tauri
+cargo test                 # unit/integration tests (pure Rust, no C toolchain)
+cargo build --release      # produces target/release/lluma-desktop(.exe)
+```
+
+Launch the built binary (or `cargo run`). First run opens with defaults: the relay URL is
+pre-filled (`https://relay.n.lluma.bodegga.net`), but the **gateway key-config** and **broker
+registry pubkey** must be supplied — click **Fetch from relay** (once the relay publishes
+`/v1/bootstrap`) or paste them in **Settings** from your operator
+(`journalctl -u lluma-gateway | grep key_config`). Then create or unlock an account in
+Settings; **Chat needs a funded account** (credits are granted to your `account_id`, shown in
+Status) and at least one active host in the network snapshot.
+
+Contributing requires an **internet-reachable ingress address** (public IP / port-forward);
+desktop-behind-NAT hosting is roadmap work.
 
 ## Repository layout
 
@@ -70,7 +96,7 @@ crates/lluma-client      consumer client (acquire tokens, exec anonymous inferen
 crates/lluma-keygen      operator key-material generator (issuer/registry/salt)
 crates/lluma-runtime     hardware detection, model recommendation, GGUF runner (needs C toolchain)
 crates/lluma-registry    model catalog + content-addressed download/verify
-apps/lluma-desktop       Tauri app (Contribute + Chat tabs; needs C toolchain)
+apps/lluma-desktop       Tauri app — Chat/Contribute/Status/Settings (pure-Rust default build)
 apps/lluma-web           marketing site (DO App Platform → lluma.bodegga.net)
 ops/deploy               production deployment (scripts, systemd units, runbook)
 docs/                    specs, plans, architecture (ADRs), handoffs

@@ -93,7 +93,12 @@ network WITHOUT touching the live `lluma.bodegga.net` site zone.
 - Optional follow-up (defense-in-depth): TLS the relay→gateway hop via `gw.n.lluma.bodegga.net`
   (Caddy on VPS-B → :8782) and set `LLUMA_RELAY_GATEWAY` to it. Not required — that hop is
   firewalled to the relay and the payload is OHTTP-sealed. Also: wire the relay signed-bootstrap
-  (`/v1/bootstrap`) to publish {relay URL + pinned gateway OHTTP key} instead of out-of-band.
+  (`/v1/bootstrap`) to publish {relay URL + pinned gateway OHTTP key + broker registry pubkey +
+  issuer key_id} instead of out-of-band. **The desktop client now consumes this** — its
+  "Fetch from relay" button calls `/v1/bootstrap`, so wiring it makes the client zero-config
+  (until then the gateway key-config + registry pubkey are pasted into Settings by hand). The
+  relay already routes `/v1/bootstrap` from a `bootstrap_blob` that is currently `None`
+  (`crates/lluma-relay/src/main.rs`); populate it after the gateway OHTTP key is persisted.
 
 ## Security follow-ups (operator)
 
