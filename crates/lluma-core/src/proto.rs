@@ -220,6 +220,11 @@ pub mod v1 {
     #[serde(deny_unknown_fields)]
     pub struct ExecRequest {
         pub key_id: [u8; 32],
+        /// The client-selected serving host (its Ed25519 account/pubkey). Routing
+        /// metadata only — the broker resolves this to a registered active host
+        /// and records the `spend_id → host_account` binding. NOT part of the E2E
+        /// seal's AAD (that is `spend_id`); a wrong host simply fails to open the seal.
+        pub host_account: [u8; 32],
         #[serde(with = "b64_token")]
         pub token: Token,
         #[serde(with = "b64_sealed")]

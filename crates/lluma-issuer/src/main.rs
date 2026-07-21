@@ -93,6 +93,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         idem: Arc::new(IssueIdempotencyCache::new()),
         admin_secret: Arc::new(admin_secret),
         now_unix_s,
+        issued_observer: None, // standalone issuer — no co-located broker counter
     };
 
     // ---- Serve ----

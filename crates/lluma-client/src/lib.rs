@@ -53,6 +53,10 @@ pub struct Client {
     sk: AccountSecretKey,
     pk: AccountPublicKey,
     host_pk: HostPublicKey,
+    /// The selected host's Ed25519 account/pubkey (routing metadata for the
+    /// broker to resolve + bind the spend to). In the full model this comes from
+    /// the signed snapshot entry alongside `host_pk` (its HPKE key).
+    host_account: [u8; 32],
 }
 
 impl Client {
@@ -62,12 +66,14 @@ impl Client {
         sk: AccountSecretKey,
         pk: AccountPublicKey,
         host_pk: HostPublicKey,
+        host_account: [u8; 32],
     ) -> Self {
         Self {
             agent: OhttpAgent::new(relay_url, gateway_key_config),
             sk,
             pk,
             host_pk,
+            host_account,
         }
     }
 
@@ -165,6 +171,7 @@ impl Client {
             lluma_crypto::e2e::e2e_seal(&mut rng, &self.host_pk, &spend_id.0, prompt, &sess_pk)?;
         let req = ExecRequest {
             key_id: kc.key_id,
+            host_account: self.host_account,
             token,
             sealed,
         };

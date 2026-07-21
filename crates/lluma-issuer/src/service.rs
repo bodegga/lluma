@@ -46,7 +46,17 @@ pub struct AppState {
     /// Injectable clock so tests run deterministically. Production sets this to
     /// `|| SystemTime::now()...` in `main.rs` (Task 9).
     pub now_unix_s: fn() -> u64,
+    /// Optional hook the CO-LOCATED broker deployment wires to bump the durable
+    /// per-epoch `issued` counter (broker `COUNTERS`) on each successful
+    /// issuance, BEFORE signatures are returned. The `redeemed ≤ issued`
+    /// tripwire needs `issued` to reflect every token released; overcount on a
+    /// later sign failure is the safe direction. `None` for the standalone
+    /// issuer (no co-located counter). Args: `(token_epoch, batch_size)`.
+    pub issued_observer: Option<IssuedObserver>,
 }
+
+/// See [`AppState::issued_observer`].
+pub type IssuedObserver = Arc<dyn Fn(u64, u64) + Send + Sync>;
 
 /// Build the v1 issuer router with the supplied state.
 pub fn router(state: AppState) -> axum::Router {
@@ -175,6 +185,14 @@ async fn issue(
     if let Err(e) = state.ledger.debit(&account_id, amount) {
         state.idem.release(&account_id, &req.body.request_id);
         return Err(e);
+    }
+
+    // Bump the durable per-epoch `issued` counter (co-located tripwire input)
+    // BEFORE releasing signatures. A later sign failure refunds the debit but
+    // leaves `issued` bumped — overcount is the safe direction (a false
+    // `redeemed > issued` trip cannot occur; undercount could DoS legit tokens).
+    if let Some(obs) = &state.issued_observer {
+        obs(state.keys.epoch, amount);
     }
 
     // Step 10: blind-sign each blinded token in order. On any failure, refund
@@ -311,6 +329,7 @@ mod tests {
             idem: Arc::new(IssueIdempotencyCache::new()),
             admin_secret: Arc::new(admin.to_string()),
             now_unix_s: || NOW,
+            issued_observer: None,
         }
     }
 
