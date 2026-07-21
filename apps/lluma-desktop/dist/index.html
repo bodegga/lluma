@@ -182,19 +182,33 @@
 
           <div class="card">
             <div class="card-head">
-              <h2>Network endpoints</h2>
-              <button class="btn ghost small" id="fetch-bootstrap">Fetch from relay</button>
+              <h2>Network</h2>
+              <span class="conn-pill" id="conn-pill"><span class="dot" id="conn-dot"></span><span id="conn-text">checking…</span></span>
             </div>
-            <label class="field"><span class="field-label">Relay URL</span>
+            <p class="hint" id="conn-hint"></p>
+            <label class="field"><span class="field-label">Relay</span>
               <input id="set-relay" type="text" /></label>
-            <label class="field"><span class="field-label">Gateway key-config (base64)</span>
-              <input id="set-gwkc" type="text" placeholder="ephemeral — fetch or paste from operator" /></label>
-            <label class="field"><span class="field-label">Broker registry pubkey (base64)</span>
-              <input id="set-regpk" type="text" placeholder="paste from operator" /></label>
             <div class="row-actions">
-              <button class="btn primary" id="save-settings">Save endpoints</button>
+              <button class="btn primary" id="connect-btn">Connect</button>
               <span class="hint" id="settings-msg"></span>
             </div>
+
+            <details class="advanced" id="advanced-endpoints">
+              <summary>Advanced — set endpoints manually</summary>
+              <p class="hint">Until the network ships a <em>signed</em> bootstrap, the gateway
+                key-config and registry pubkey are entered by hand. Get them from your operator
+                (<code class="mono">journalctl -u lluma-gateway | grep key_config</code>).
+                <strong>Fetching them from the relay is not safe by default</strong> — a relay you
+                route through could hand you a key it controls and read your prompts.</p>
+              <label class="field"><span class="field-label">Gateway key-config (base64)</span>
+                <input id="set-gwkc" type="text" placeholder="paste from operator" /></label>
+              <label class="field"><span class="field-label">Broker registry pubkey (base64)</span>
+                <input id="set-regpk" type="text" placeholder="paste from operator" /></label>
+              <div class="row-actions">
+                <button class="btn ghost small" id="save-settings">Save endpoints</button>
+                <button class="btn ghost small" id="fetch-bootstrap">Fetch from relay (unverified)</button>
+              </div>
+            </details>
           </div>
 
           <div class="card">

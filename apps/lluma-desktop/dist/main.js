@@ -99,6 +99,21 @@ function dot(el, state) { // state: ok | warn | bad
   el.className = `dot ${state}`;
 }
 
+// Reflect connection state in the Settings "Network" card. When the endpoints
+// needed to connect are missing, reveal the Advanced section so the next step
+// is visible — but never silently trust the relay for them.
+function updateConn(reachable, message) {
+  const needsEndpoints = !$("set-gwkc").value.trim() || !$("set-regpk").value.trim();
+  dot($("conn-dot"), reachable ? "ok" : (needsEndpoints ? "warn" : "bad"));
+  $("conn-text").textContent = reachable ? "connected" : (needsEndpoints ? "not configured" : "offline");
+  $("conn-hint").textContent = reachable
+    ? "Connected to the network."
+    : (needsEndpoints
+        ? "This relay needs a gateway key-config + registry pubkey to connect. Add them under Advanced."
+        : (message || "Relay unreachable."));
+  if (!reachable && needsEndpoints) $("advanced-endpoints").open = true;
+}
+
 async function refreshStatus() {
   $("net-val").textContent = "…";
   try {
@@ -111,16 +126,29 @@ async function refreshStatus() {
     $("net-epoch").textContent = ns.reachable ? ns.epoch : "—";
     $("net-denom").textContent = ns.reachable ? `denom ${ns.denomination}` : "denom —";
     if (!ns.reachable) $("net-latency").textContent = ns.message;
+    updateConn(ns.reachable, ns.message);
   } catch (e) {
     dot($("net-dot"), "bad"); dot($("rail-net-dot"), "bad");
     $("net-val").textContent = "offline";
     $("rail-net-label").textContent = "offline";
     $("net-latency").textContent = String(e);
+    updateConn(false, String(e));
   }
   await refreshAccount();
 }
 
 $("refresh-status").addEventListener("click", refreshStatus);
+
+// Explicit connect: save the current relay + endpoints, then probe.
+$("connect-btn").addEventListener("click", async () => {
+  $("settings-msg").textContent = "Connecting…";
+  try {
+    const base = await call("get_settings");
+    await call("set_settings", { settings: currentSettingsFromForm(base) });
+    await refreshStatus();
+    $("settings-msg").textContent = "";
+  } catch (e) { $("settings-msg").textContent = String(e); }
+});
 
 $("copy-id").addEventListener("click", () => {
   if (acct.account_id_hex) { navigator.clipboard.writeText(acct.account_id_hex); toast("Account id copied"); }
