@@ -1,0 +1,22 @@
+# VPS-A — relay (distinct provider from VPS-B; the ONLY party that sees client IPs).
+# TEMPLATE — NOT installed/enabled by this repo.
+[Unit]
+Description=Lluma relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lluma
+Group=lluma
+EnvironmentFile=/etc/lluma/relay.env
+ExecStart=/usr/local/bin/lluma-relay
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
