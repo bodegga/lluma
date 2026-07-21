@@ -49,10 +49,10 @@
 
           <div class="fund-banner hidden" id="fund-banner">
             <div>
-              <strong>No credits yet.</strong>
-              <span>Fund your account to start chatting — copy your account id from Status and ask your operator to grant credits, then acquire tokens in Settings.</span>
+              <strong id="fund-title">No credits yet.</strong>
+              <span id="fund-sub">Fund your account to start chatting — copy your account id from Status and ask your operator to grant credits, then acquire tokens in Settings.</span>
             </div>
-            <button class="btn ghost" data-goto="status">Go to Status</button>
+            <button class="btn ghost" id="fund-cta">Go to Settings</button>
           </div>
 
           <form class="composer" id="composer">
@@ -151,6 +151,7 @@
             <p class="field-label">Account id <span class="hint">— share this to receive credits</span></p>
             <div class="idrow">
               <code class="mono account-id" id="account-id">no account yet</code>
+              <button class="btn primary small hidden" id="acct-cta">Create account</button>
               <button class="btn ghost small" id="copy-id">Copy</button>
             </div>
           </div>

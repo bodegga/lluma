@@ -54,7 +54,29 @@ function renderAccount() {
   const canChat = acct.unlocked && acct.balance > 0;
   $("prompt").disabled = !canChat;
   $("send-btn").disabled = !canChat;
-  show($("fund-banner"), acct.unlocked && acct.balance === 0);
+
+  // Adaptive guidance banner (Chat) — steer a new user to the exact next step.
+  let banner = null;
+  if (!acct.has_account) {
+    banner = { title: "No account yet.", sub: "Create an anonymous account to get started — it's sealed on this device with your passphrase.", label: "Create account" };
+  } else if (!acct.unlocked) {
+    banner = { title: "Account locked.", sub: "Unlock your account with your passphrase to start chatting.", label: "Unlock" };
+  } else if (acct.balance === 0) {
+    banner = { title: "No credits yet.", sub: "Copy your account id from Status and ask your operator to grant credits, then Acquire tokens in Settings.", label: "Acquire tokens" };
+  }
+  show($("fund-banner"), !!banner);
+  if (banner) {
+    $("fund-title").textContent = banner.title;
+    $("fund-sub").textContent = banner.sub;
+    $("fund-cta").textContent = banner.label;
+  }
+
+  // Status account-id card: adaptive action + copy visibility.
+  const cta = $("acct-cta");
+  if (!acct.has_account) { cta.textContent = "Create account"; show(cta, true); show($("copy-id"), false); }
+  else if (!acct.unlocked) { cta.textContent = "Unlock"; show(cta, true); show($("copy-id"), false); }
+  else { show(cta, false); show($("copy-id"), true); }
+
   $("thread-empty") && show($("thread-empty"), $("thread").childElementCount <= 1);
 
   // Settings account section
@@ -103,6 +125,19 @@ $("refresh-status").addEventListener("click", refreshStatus);
 $("copy-id").addEventListener("click", () => {
   if (acct.account_id_hex) { navigator.clipboard.writeText(acct.account_id_hex); toast("Account id copied"); }
 });
+
+// Jump to Settings and focus the field that matches the current account state.
+function gotoAccountStep() {
+  switchTab("settings");
+  setTimeout(() => {
+    const el = !acct.has_account ? $("acct-pass")
+      : (!acct.unlocked ? $("unlock-pass") : $("acquire-n"));
+    el?.focus();
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+  }, 40);
+}
+$("acct-cta").addEventListener("click", gotoAccountStep);
+$("fund-cta").addEventListener("click", gotoAccountStep);
 
 // ---- chat ----
 function addBubble(role, text) {
@@ -305,6 +340,8 @@ $("host-stop").addEventListener("click", async () => {
   await loadSettings();
   await refreshAccount();
   await refreshStatus();
+  // First run with no account: land on Settings so creating one is the obvious step.
+  if (!acct.has_account) gotoAccountStep();
   setInterval(() => {
     if ($("panel-contribute").classList.contains("active")) refreshHost();
   }, 4000);
