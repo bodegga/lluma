@@ -7,11 +7,14 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
         "title": "Lluma",
-        "width": 980,
-        "height": 720,
+        "width": 1120,
+        "height": 760,
+        "minWidth": 880,
+        "minHeight": 600,
         "resizable": true
       }
     ],

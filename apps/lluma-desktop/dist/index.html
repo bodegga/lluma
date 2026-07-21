@@ -7,33 +7,252 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <header>
-      <h1>Lluma</h1>
-      <nav>
-        <button id="tab-contribute" class="tab active">Contribute</button>
-        <button id="tab-chat" class="tab">Chat</button>
-      </nav>
-    </header>
+    <div id="app">
+      <!-- Left rail -->
+      <aside class="rail">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">◇</span>
+          <span class="brand-word">lluma</span>
+        </div>
+        <nav class="nav">
+          <button class="nav-item active" data-tab="chat"><span class="nav-ico">▸</span> Chat</button>
+          <button class="nav-item" data-tab="contribute"><span class="nav-ico">↑</span> Contribute</button>
+          <button class="nav-item" data-tab="status"><span class="nav-ico">◈</span> Status</button>
+          <button class="nav-item" data-tab="settings"><span class="nav-ico">⚙</span> Settings</button>
+        </nav>
+        <div class="rail-foot">
+          <div class="chip" id="rail-net"><span class="dot" id="rail-net-dot"></span><span id="rail-net-label">checking…</span></div>
+          <div class="chip" id="rail-bal"><span class="mono" id="rail-bal-val">—</span> credits</div>
+        </div>
+      </aside>
 
-    <main>
-      <section id="panel-contribute" class="panel">
-        <h2>Contribute compute</h2>
-        <p id="hw"></p>
-        <p id="rec"></p>
-        <button id="btn-detect">Detect my hardware</button>
-        <button id="btn-recommend">Recommend a model</button>
-      </section>
+      <!-- Main -->
+      <main class="main">
+        <!-- CHAT -->
+        <section class="panel active" id="panel-chat">
+          <header class="panel-head">
+            <div>
+              <p class="eyebrow">anonymous inference</p>
+              <h1>Chat</h1>
+            </div>
+            <div class="head-meta mono" id="chat-balance">— credits</div>
+          </header>
 
-      <section id="panel-chat" class="panel hidden">
-        <h2>Chat</h2>
-        <div id="output" aria-live="polite"></div>
-        <form id="chat-form">
-          <input id="prompt" type="text" placeholder="Ask anything…" autocomplete="off" />
-          <button type="submit">Send</button>
-        </form>
-      </section>
-    </main>
+          <div class="thread" id="thread" aria-live="polite">
+            <div class="thread-empty" id="thread-empty">
+              <p class="empty-glyph" aria-hidden="true">▸</p>
+              <p class="empty-title">Ask anything, anonymously.</p>
+              <p class="empty-sub">Your prompt is sealed end-to-end and routed so no single hop
+                ever sees both who you are and what you asked.</p>
+            </div>
+          </div>
 
+          <div class="fund-banner hidden" id="fund-banner">
+            <div>
+              <strong>No credits yet.</strong>
+              <span>Fund your account to start chatting — copy your account id from Status and ask your operator to grant credits, then acquire tokens in Settings.</span>
+            </div>
+            <button class="btn ghost" data-goto="status">Go to Status</button>
+          </div>
+
+          <form class="composer" id="composer">
+            <textarea id="prompt" rows="1" placeholder="Send a message…" autocomplete="off"></textarea>
+            <button class="btn primary" type="submit" id="send-btn">Send</button>
+          </form>
+        </section>
+
+        <!-- CONTRIBUTE -->
+        <section class="panel" id="panel-contribute">
+          <header class="panel-head">
+            <div>
+              <p class="eyebrow">earn credits by serving</p>
+              <h1>Contribute compute</h1>
+            </div>
+            <div class="head-meta" id="host-state-pill"><span class="dot" id="host-dot"></span><span id="host-state">stopped</span></div>
+          </header>
+
+          <div class="card note">
+            <p><strong>Serving needs a reachable address.</strong> The broker forwards sealed
+            prompts to your host's ingress, so it must be reachable from the internet
+            (public IP or port-forward). Behind home NAT this won't receive traffic yet —
+            NAT-friendly hosting is on the roadmap.</p>
+          </div>
+
+          <div class="grid-2">
+            <div class="card">
+              <label class="field">
+                <span class="field-label">Upstream model</span>
+                <select id="host-upstream">
+                  <option value="open_ai">OpenAI-compatible server</option>
+                  <option value="echo">Echo (diagnostics)</option>
+                  <option value="local">In-process llama.cpp (needs local-inference build)</option>
+                </select>
+              </label>
+              <div id="openai-fields">
+                <label class="field"><span class="field-label">Base URL</span>
+                  <input id="host-openai-base" type="text" placeholder="http://localhost:11434/v1" /></label>
+                <label class="field"><span class="field-label">Model</span>
+                  <input id="host-openai-model" type="text" placeholder="qwen2.5:0.5b" /></label>
+                <label class="field"><span class="field-label">API key (optional)</span>
+                  <input id="host-openai-key" type="password" placeholder="sk-… (leave blank for local)" /></label>
+              </div>
+            </div>
+
+            <div class="card">
+              <label class="field"><span class="field-label">Ingress address (public)</span>
+                <input id="host-ingress" type="text" placeholder="http://your-public-ip:9000" /></label>
+              <label class="field"><span class="field-label">Advertised model label</span>
+                <input id="host-model-id" type="text" placeholder="qwen2.5-0.5b" /></label>
+              <div class="host-metrics">
+                <div><span class="metric-val mono" id="host-reach">—</span><span class="metric-label">reachable</span></div>
+                <div><span class="metric-val mono" id="host-served">0</span><span class="metric-label">served</span></div>
+                <div><span class="metric-val mono" id="host-earned">0</span><span class="metric-label">credits earned</span></div>
+              </div>
+            </div>
+          </div>
+
+          <div class="row-actions">
+            <button class="btn primary" id="host-start">Start serving</button>
+            <button class="btn ghost" id="host-stop">Stop</button>
+            <span class="hint" id="host-msg"></span>
+          </div>
+        </section>
+
+        <!-- STATUS -->
+        <section class="panel" id="panel-status">
+          <header class="panel-head">
+            <div>
+              <p class="eyebrow">network &amp; privacy</p>
+              <h1>Status</h1>
+            </div>
+            <button class="btn ghost small" id="refresh-status">Refresh</button>
+          </header>
+
+          <div class="grid-3">
+            <div class="card stat">
+              <span class="stat-dot"><span class="dot" id="net-dot"></span></span>
+              <span class="stat-val" id="net-val">…</span>
+              <span class="stat-label">network</span>
+              <span class="stat-sub mono" id="net-latency">—</span>
+            </div>
+            <div class="card stat">
+              <span class="stat-val mono" id="net-epoch">—</span>
+              <span class="stat-label">issuer epoch</span>
+              <span class="stat-sub mono" id="net-denom">denom —</span>
+            </div>
+            <div class="card stat">
+              <span class="stat-val mono" id="stat-balance">—</span>
+              <span class="stat-label">your credits</span>
+              <span class="stat-sub" id="stat-locked">locked</span>
+            </div>
+          </div>
+
+          <div class="card">
+            <p class="field-label">Account id <span class="hint">— share this to receive credits</span></p>
+            <div class="idrow">
+              <code class="mono account-id" id="account-id">no account yet</code>
+              <button class="btn ghost small" id="copy-id">Copy</button>
+            </div>
+          </div>
+
+          <!-- Signature element: the hop chain -->
+          <div class="card privacy">
+            <p class="eyebrow">why this is private</p>
+            <p class="privacy-lede">No single hop ever holds both <em>who you are</em> and
+              <em>what you asked</em>. That is the whole design.</p>
+            <ol class="hopchain" id="hopchain">
+              <li class="hop"><span class="hop-node">You</span><span class="hop-sees">hold identity + prompt</span></li>
+              <li class="hop"><span class="hop-node">Relay</span><span class="hop-sees">sees your IP — but only ciphertext</span></li>
+              <li class="hop"><span class="hop-node">Gateway</span><span class="hop-sees">unwraps transport — never your IP</span></li>
+              <li class="hop"><span class="hop-node">Broker</span><span class="hop-sees">spends a blind token — no identity</span></li>
+              <li class="hop"><span class="hop-node">Host</span><span class="hop-sees">reads the prompt — never your IP</span></li>
+            </ol>
+          </div>
+        </section>
+
+        <!-- SETTINGS -->
+        <section class="panel" id="panel-settings">
+          <header class="panel-head">
+            <div>
+              <p class="eyebrow">endpoints &amp; account</p>
+              <h1>Settings</h1>
+            </div>
+          </header>
+
+          <div class="card">
+            <div class="card-head">
+              <h2>Network endpoints</h2>
+              <button class="btn ghost small" id="fetch-bootstrap">Fetch from relay</button>
+            </div>
+            <label class="field"><span class="field-label">Relay URL</span>
+              <input id="set-relay" type="text" /></label>
+            <label class="field"><span class="field-label">Gateway key-config (base64)</span>
+              <input id="set-gwkc" type="text" placeholder="ephemeral — fetch or paste from operator" /></label>
+            <label class="field"><span class="field-label">Broker registry pubkey (base64)</span>
+              <input id="set-regpk" type="text" placeholder="paste from operator" /></label>
+            <div class="row-actions">
+              <button class="btn primary" id="save-settings">Save endpoints</button>
+              <span class="hint" id="settings-msg"></span>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-head"><h2>Account</h2>
+              <span class="acct-state" id="acct-state">no account</span></div>
+
+            <div id="acct-none">
+              <p class="hint">Create a new anonymous account or import a 12-word recovery phrase.
+                Everything is sealed on this device with your passphrase.</p>
+              <label class="field"><span class="field-label">Passphrase</span>
+                <input id="acct-pass" type="password" placeholder="choose a strong passphrase" /></label>
+              <label class="field"><span class="field-label">Recovery phrase (to import)</span>
+                <input id="acct-phrase" type="text" placeholder="leave blank to create a new account" /></label>
+              <div class="row-actions">
+                <button class="btn primary" id="acct-create">Create account</button>
+                <button class="btn ghost" id="acct-import">Import phrase</button>
+              </div>
+            </div>
+
+            <div id="acct-locked" class="hidden">
+              <p class="hint">Account is locked. Enter your passphrase to unlock.</p>
+              <label class="field"><span class="field-label">Passphrase</span>
+                <input id="unlock-pass" type="password" /></label>
+              <div class="row-actions"><button class="btn primary" id="acct-unlock">Unlock</button></div>
+            </div>
+
+            <div id="acct-unlocked" class="hidden">
+              <div class="idrow">
+                <code class="mono account-id" id="set-account-id"></code>
+                <button class="btn ghost small" id="acct-lock">Lock</button>
+              </div>
+              <div class="acquire">
+                <label class="field"><span class="field-label">Acquire tokens</span>
+                  <input id="acquire-n" type="number" min="1" value="10" /></label>
+                <button class="btn primary" id="acquire-btn">Acquire</button>
+              </div>
+              <span class="hint" id="acct-msg"></span>
+            </div>
+          </div>
+
+          <!-- Recovery phrase reveal (shown once on create/import) -->
+          <div class="modal hidden" id="phrase-modal">
+            <div class="modal-card">
+              <p class="eyebrow">write this down</p>
+              <h2>Your recovery phrase</h2>
+              <p class="hint">These 12 words restore your account and credits. Anyone with them
+                controls your account. Store them offline — they are shown only now.</p>
+              <code class="mono phrase-box" id="phrase-box"></code>
+              <div class="row-actions">
+                <button class="btn ghost small" id="phrase-copy">Copy</button>
+                <button class="btn primary" id="phrase-done">I've saved it</button>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div class="toast hidden" id="toast"></div>
     <script type="module" src="main.js"></script>
   </body>
 </html>
