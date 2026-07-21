@@ -28,11 +28,19 @@ client ──TLS──▶  RELAY (Vultr)  ──▶  GATEWAY + co-located ISSUER
 
 ## Hosts (live)
 
-| Role | Provider | Name | Public IP | Hostname | Status |
+| Role | Provider | Name | Public IP | Ports | Status |
 |---|---|---|---|---|---|
-| Relay (VPS-A) | Vultr | `lluma-relay` | TBD | `relay.lluma.bodegga.net` (planned) | not yet provisioned |
-| Gateway + broker origin (VPS-B) | DigitalOcean | `lluma-broker` | TBD | `gw.lluma.bodegga.net` (planned) | not yet provisioned |
-| Marketing site | DO App Platform | `lluma-web` | (managed) | `lluma.bodegga.net` | live |
+| Relay (VPS-A) | Vultr (ord) | `lluma-relay` | `64.177.112.245` | `8780` (public, ufw) | **live** |
+| Gateway + broker origin (VPS-B) | DigitalOcean (nyc3) | `lluma-broker` | `159.65.35.137` | `8782` gateway, `8081` ingress, `8080` core (loopback) | **live** |
+| Echo serving host (demo) | co-located on VPS-B | `lluma-host` | `159.65.35.137` | `9000` | **live** (echo upstream; registered + admitted) |
+| Marketing site | DO App Platform | `lluma-web` | (managed) | — | live → `lluma.bodegga.net` |
+
+**Verified 2026-07-21:** a full anonymous inference completed end-to-end
+(`client → relay → gateway → broker → host → back`) — blind-token issuance, OHTTP
+relaying, PoW host registration + admission, spend-before-forward redeem, and E2E
+sealing all exercised live. Reproduce with `cargo run -p lluma-client --example
+live_smoke` (env in the example header; gateway key-config from
+`journalctl -u lluma-gateway | grep key_config`).
 
 **DO droplets that are NOT Lluma — do not touch:** `carflipper-automation`, `debian-…-sfo3-01`,
 `wedding.biasi.co`, `trading-bot`, `bodegga-web` (147.182.175.148), `laws-ingest`.
