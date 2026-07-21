@@ -45,7 +45,28 @@ fn main() -> Result<(), String> {
 }
 
 fn write(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {
-    std::fs::write(dir.join(name), bytes).map_err(|e| format!("write {name}: {e}"))
+    let path = dir.join(name);
+    // Create the file 0600 BEFORE writing on Unix, so the secret bytes are never
+    // momentarily world-readable. On other platforms fall back to a plain write
+    // (the printed reminder covers host-side hardening).
+    #[cfg(unix)]
+    {
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&path)
+            .map_err(|e| format!("open {name}: {e}"))?;
+        f.write_all(bytes).map_err(|e| format!("write {name}: {e}"))?;
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::write(&path, bytes).map_err(|e| format!("write {name}: {e}"))?;
+    }
+    Ok(())
 }
 
 fn hex(b: &[u8]) -> String {
