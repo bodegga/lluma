@@ -1,6 +1,7 @@
 //! Lluma desktop app entrypoint. Command modules are added in later tasks.
 
 mod account;
+mod client;
 mod settings;
 mod types;
 
