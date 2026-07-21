@@ -10,11 +10,40 @@
 
 use blind_rsa_signatures::reexports::rand::Rng;
 
-use lluma_core::proto::v1::{ExecRequest, ExecResponse, IssueRequest, IssueResponse, KeyConfigResponse};
+use lluma_core::proto::v1::{
+    ExecRequest, ExecResponse, IssueRequest, IssueResponse, KeyConfigResponse, SnapshotResponse,
+};
 use lluma_core::wire::{
-    AccountPublicKey, AccountSecretKey, HostPublicKey, IssueRequestBody, OhttpKeyConfig, Token,
+    AccountPublicKey, AccountSecretKey, HostPublicKey, IssueRequestBody, OhttpKeyConfig,
+    ReceiptSignature, SnapshotBody, SnapshotHostEntry, Token,
 };
 use lluma_net::{InnerRequest, OhttpAgent};
+
+/// Fixed snapshot bucket size (64 KiB) and length-prefix width — must match the
+/// broker's `snapshot` module exactly.
+const SNAPSHOT_BUCKET: usize = 65_536;
+const SNAPSHOT_LEN_PREFIX: usize = 4;
+
+/// Verify a signed registry snapshot and decode its body. Fails closed on any
+/// size / signature / length / decode mismatch. Pure (no network) so it is unit
+/// testable and reused by [`Client::snapshot`].
+pub fn verify_snapshot(
+    registry_pk: &AccountPublicKey,
+    sr: &SnapshotResponse,
+) -> Result<SnapshotBody, ClientError> {
+    if sr.body.len() != SNAPSHOT_BUCKET {
+        return Err(ClientError::Protocol);
+    }
+    let sig = ReceiptSignature(sr.sig.clone());
+    lluma_crypto::account::snapshot_verify(registry_pk, &sr.body, &sig)
+        .map_err(|_| ClientError::Crypto)?;
+    let len = u32::from_le_bytes([sr.body[0], sr.body[1], sr.body[2], sr.body[3]]) as usize;
+    let end = SNAPSHOT_LEN_PREFIX
+        .checked_add(len)
+        .filter(|e| *e <= sr.body.len())
+        .ok_or(ClientError::Protocol)?;
+    postcard::from_bytes(&sr.body[SNAPSHOT_LEN_PREFIX..end]).map_err(|_| ClientError::Protocol)
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClientError {
@@ -156,22 +185,69 @@ impl Client {
         Ok(tokens)
     }
 
-    /// Execute one anonymous inference: seal `prompt` E2E to the host (aad =
-    /// spend_id), spend the token via the broker, open the sealed response.
+    /// Fetch + verify the signed host snapshot over the relay, returning the
+    /// active hosts. The client selects a host locally (there is no live
+    /// "pick me a host" query).
+    pub async fn snapshot(
+        &self,
+        registry_pk: &AccountPublicKey,
+    ) -> Result<Vec<SnapshotHostEntry>, ClientError> {
+        let resp = self
+            .agent
+            .round_trip(InnerRequest {
+                method: "GET".into(),
+                path: "/v1/snapshot".into(),
+                content_type: None,
+                body: Vec::new(),
+            })
+            .await?;
+        if resp.status != 200 {
+            return Err(ClientError::Server(resp.status));
+        }
+        let sr: SnapshotResponse =
+            serde_json::from_slice(&resp.body).map_err(|_| ClientError::Protocol)?;
+        Ok(verify_snapshot(registry_pk, &sr)?.hosts)
+    }
+
+    /// Execute one anonymous inference against the host configured at
+    /// construction. Retained for back-compat (`live_smoke`); delegates to
+    /// [`Client::exec_with_host`].
     pub async fn exec(
         &self,
         kc: &KeyConfigResponse,
         token: Token,
         prompt: &[u8],
     ) -> Result<Vec<u8>, ClientError> {
+        let host = SnapshotHostEntry {
+            host_account: self.host_account,
+            hpke_pk: self.host_pk.0.clone(),
+            models: vec![],
+            tier_flags: 0,
+            load_bucket: 0,
+            freshness_bucket: 0,
+        };
+        self.exec_with_host(kc, token, &host, prompt).await
+    }
+
+    /// Execute one anonymous inference against a specific snapshot-selected
+    /// host: seal `prompt` E2E to that host (aad = spend_id), spend the token
+    /// via the broker, open the sealed response.
+    pub async fn exec_with_host(
+        &self,
+        kc: &KeyConfigResponse,
+        token: Token,
+        host: &SnapshotHostEntry,
+        prompt: &[u8],
+    ) -> Result<Vec<u8>, ClientError> {
+        let host_pk = HostPublicKey(host.hpke_pk.clone());
         let spend_id = lluma_crypto::tokens::token_spend_id(&token);
         let mut rng = rand_core::OsRng;
         let (sess_sk, sess_pk) = lluma_crypto::e2e::session_keygen(&mut rng)?;
         let sealed =
-            lluma_crypto::e2e::e2e_seal(&mut rng, &self.host_pk, &spend_id.0, prompt, &sess_pk)?;
+            lluma_crypto::e2e::e2e_seal(&mut rng, &host_pk, &spend_id.0, prompt, &sess_pk)?;
         let req = ExecRequest {
             key_id: kc.key_id,
-            host_account: self.host_account,
+            host_account: host.host_account,
             token,
             sealed,
         };
