@@ -12,7 +12,6 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use base64::Engine;
 use lluma_core::wire::{HostPublicKey, HostSecretKey, KeystoreBlob};
 use lluma_host::{EchoUpstream, HostState, OpenAiUpstream, Upstream};
 
@@ -69,11 +68,6 @@ pub fn load_or_create_host_key(
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     std::fs::write(hk_path(dir), &blob.0).map_err(|e| e.to_string())?;
     Ok((sk, pk))
-}
-
-/// Base64 the host HPKE public key (for display / registration).
-pub fn host_pk_b64(pk: &HostPublicKey) -> String {
-    base64::engine::general_purpose::STANDARD.encode(&pk.0)
 }
 
 /// Extract the TCP port to bind from an ingress URL like `http://host:9000`.

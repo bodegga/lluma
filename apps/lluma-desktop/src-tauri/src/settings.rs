@@ -52,8 +52,10 @@ mod tests {
     fn save_then_load_round_trips() {
         let dir = std::env::temp_dir().join(format!("lluma-settings-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
-        let mut s = Settings::default();
-        s.gateway_kc_b64 = "abc".into();
+        let s = Settings {
+            gateway_kc_b64: "abc".into(),
+            ..Default::default()
+        };
         s.save(&dir).unwrap();
         let back = Settings::load(&dir);
         assert_eq!(back.gateway_kc_b64, "abc");

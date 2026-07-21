@@ -88,3 +88,22 @@ pub struct ChatReply {
     pub spent: usize,
     pub balance: usize,
 }
+
+/// Returned once, on account creation/import, so the UI can show the recovery
+/// phrase for the user to write down. Never persisted in the clear.
+#[derive(Debug, Clone, Serialize)]
+pub struct NewAccount {
+    pub account_id_hex: String,
+    pub recovery_phrase: String,
+}
+
+/// Endpoint material published by the relay bootstrap (all base64/hex strings).
+#[derive(Debug, Clone, Deserialize)]
+pub struct BootstrapDoc {
+    #[serde(default)]
+    pub gateway_kc_b64: String,
+    #[serde(default)]
+    pub registry_pk_b64: String,
+    #[serde(default)]
+    pub issuer_key_id_hex: String,
+}
