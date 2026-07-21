@@ -340,6 +340,10 @@ Cross-references above use ADR-0001's L1/L2/L4/L8 as defined there. New entries:
 | L11 | Relay selection & failover pattern as a client fingerprint; synchronized mass failover is a correlatable event | Random sticky-per-session/epoch relay choice; client-side jittered retry; no per-request hopping |
 | L12 | Per-client-tuned PoW difficulty (or any per-client duress parameter) tags individual users — same class as a targeted key-config (L2) | Single global difficulty knob, published/observable; uniform application at the relay |
 | L13 | Payment rail links real-world identity to credit purchases; purchase-timing can correlate with issuance bursts | Out of crypto's reach by design — blinding already unlinks purchase from spend (ADR-0001 §4.2); decouple issuance timing from purchase (client-side scheduling, fixed batches per L4); keep payment processor blind to usage data; deplatforming risk noted in §9 |
+| L14 | Co-located issuer+broker (MVP, R6) sees the account at `/issue` and the token at `/exec` over one operator; debit/redeem timing could be correlated | Client fixed-batch randomized pre-fetch + randomized spend delay (#5); eliminated by the VPS-C issuer/broker split behind the `settle()` seam |
+| L15 | Usage-receipt `units` is a host-attested response-size channel per `spend_id` that survives future response padding | Coarse buckets (`units ≤ 4`) + hour-coarse `timestamp_h`; credit is 1/receipt regardless of `units`; revisit if finer metering is ever added |
+| L16 | Trial registration (`/v1/register`) binds `account_pk` → issue → spend for a brand-new account at its most identifiable moment, extending the issue→spend temporal correlation earlier | Trial register MUST ride the relay/gateway path (never the direct host-ingress listener); #5 pre-fetch pools + randomized spend delay |
+| L17 | A direct (non-relay) snapshot GET reveals the client IP as a Lluma user plus fetch-timing that precedes an exec | Fetch the signed snapshot over the relay path on a fixed cadence (client, #5); snapshot is a static signed blob so any cache/CDN in front sees only ciphertext-equivalent bytes |
 
 ---
 
