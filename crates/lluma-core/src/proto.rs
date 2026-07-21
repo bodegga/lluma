@@ -9,8 +9,9 @@
 
 pub mod v1 {
     use crate::wire::{
-        AccountId, BlindSignature, BlindedTokenRequest, IssueRequestBody, IssueSignature,
-        IssuerPublicKey, ResponsePreamble, SealedRequest, SpendId, Token,
+        AccountId, BlindSignature, BlindedTokenRequest, HeartbeatBody, HostRegisterBody,
+        IssueRequestBody, IssueSignature, IssuerPublicKey, ResponsePreamble, SealedRequest,
+        SpendId, Token, TrialRegisterBody, UsageReceiptBody,
     };
     use base64::{engine::general_purpose::STANDARD, Engine};
     use serde::{Deserialize, Serialize};
@@ -123,7 +124,9 @@ pub mod v1 {
         }
         pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<SealedRequest, D::Error> {
             let st: String = Deserialize::deserialize(d)?;
-            Ok(SealedRequest(STANDARD.decode(st).map_err(serde::de::Error::custom)?))
+            Ok(SealedRequest(
+                STANDARD.decode(st).map_err(serde::de::Error::custom)?,
+            ))
         }
     }
 
@@ -136,7 +139,9 @@ pub mod v1 {
         }
         pub fn deserialize<'de, D: Deserializer<'de>>(d: D) -> Result<ResponsePreamble, D::Error> {
             let st: String = Deserialize::deserialize(d)?;
-            Ok(ResponsePreamble(STANDARD.decode(st).map_err(serde::de::Error::custom)?))
+            Ok(ResponsePreamble(
+                STANDARD.decode(st).map_err(serde::de::Error::custom)?,
+            ))
         }
     }
 
@@ -215,6 +220,11 @@ pub mod v1 {
     #[serde(deny_unknown_fields)]
     pub struct ExecRequest {
         pub key_id: [u8; 32],
+        /// The client-selected serving host (its Ed25519 account/pubkey). Routing
+        /// metadata only — the broker resolves this to a registered active host
+        /// and records the `spend_id → host_account` binding. NOT part of the E2E
+        /// seal's AAD (that is `spend_id`); a wrong host simply fails to open the seal.
+        pub host_account: [u8; 32],
         #[serde(with = "b64_token")]
         pub token: Token,
         #[serde(with = "b64_sealed")]
@@ -241,6 +251,64 @@ pub mod v1 {
         pub spend_id: SpendId,
         #[serde(with = "b64_sealed")]
         pub sealed: SealedRequest,
+    }
+
+    /// `POST /v1/host/register` — a host joins the registry. `sig` is the
+    /// host's Ed25519 signature over the canonical `HostRegisterBody`;
+    /// `pow_nonce` is the broker-issued 8-byte proof-of-work nonce.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct HostRegisterRequest {
+        pub body: HostRegisterBody,
+        #[serde(with = "b64_vec")]
+        pub sig: Vec<u8>,
+        #[serde(with = "b64_vec")]
+        pub pow_nonce: Vec<u8>,
+    }
+
+    /// `POST /v1/host/heartbeat` — periodic host liveness + load report.
+    /// `sig` is the host's Ed25519 signature over the canonical `HeartbeatBody`.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct HeartbeatRequest {
+        pub body: HeartbeatBody,
+        #[serde(with = "b64_vec")]
+        pub sig: Vec<u8>,
+    }
+
+    /// `POST /v1/trial/register` — anti-Sybil one-time trial registration;
+    /// `pow_nonce` is the 8-byte proof-of-work nonce tying the registration to
+    /// the consumer account.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct TrialRegisterRequest {
+        pub body: TrialRegisterBody,
+        #[serde(with = "b64_vec")]
+        pub pow_nonce: Vec<u8>,
+    }
+
+    /// `POST /v1/receipt/submit` — a host submits a signed usage receipt for
+    /// ledger credit. `sig` is the host's Ed25519 signature over the canonical
+    /// `UsageReceiptBody`.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct ReceiptSubmit {
+        pub body: UsageReceiptBody,
+        #[serde(with = "b64_vec")]
+        pub sig: Vec<u8>,
+    }
+
+    /// `GET /v1/snapshot` response — the fixed-size (64 KiB) padded, signed
+    /// registry snapshot. `body` is the postcard-encoded `SnapshotBody`
+    /// (zero-padded to the 65536-byte bucket); `sig` is the registry key's
+    /// Ed25519 signature over the EXACT bytes of `body`.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct SnapshotResponse {
+        #[serde(with = "b64_vec")]
+        pub body: Vec<u8>,
+        #[serde(with = "b64_vec")]
+        pub sig: Vec<u8>,
     }
 
     impl HostExecRequest {
@@ -271,6 +339,75 @@ pub mod v1 {
             }
             if self.chunk.is_empty() {
                 return Err(ProtoError::WrongLength("chunk"));
+            }
+            Ok(())
+        }
+    }
+
+    impl HostRegisterRequest {
+        pub fn validate(&self) -> Result<(), ProtoError> {
+            if self.body.version != 1 {
+                return Err(ProtoError::WrongLength("version"));
+            }
+            if self.sig.len() != 64 {
+                return Err(ProtoError::WrongLength("sig"));
+            }
+            if self.pow_nonce.len() != 8 {
+                return Err(ProtoError::WrongLength("pow_nonce"));
+            }
+            if self.body.ingress_addr.is_empty() {
+                return Err(ProtoError::WrongLength("ingress_addr"));
+            }
+            if self.body.hpke_pk.is_empty() {
+                return Err(ProtoError::WrongLength("hpke_pk"));
+            }
+            Ok(())
+        }
+    }
+
+    impl HeartbeatRequest {
+        pub fn validate(&self) -> Result<(), ProtoError> {
+            if self.body.version != 1 {
+                return Err(ProtoError::WrongLength("version"));
+            }
+            if self.sig.len() != 64 {
+                return Err(ProtoError::WrongLength("sig"));
+            }
+            Ok(())
+        }
+    }
+
+    impl TrialRegisterRequest {
+        pub fn validate(&self) -> Result<(), ProtoError> {
+            if self.body.version != 1 {
+                return Err(ProtoError::WrongLength("version"));
+            }
+            if self.pow_nonce.len() != 8 {
+                return Err(ProtoError::WrongLength("pow_nonce"));
+            }
+            Ok(())
+        }
+    }
+
+    impl ReceiptSubmit {
+        pub fn validate(&self) -> Result<(), ProtoError> {
+            if self.body.version != 1 {
+                return Err(ProtoError::WrongLength("version"));
+            }
+            if self.sig.len() != 64 {
+                return Err(ProtoError::WrongLength("sig"));
+            }
+            Ok(())
+        }
+    }
+
+    impl SnapshotResponse {
+        pub fn validate(&self) -> Result<(), ProtoError> {
+            if self.sig.len() != 64 {
+                return Err(ProtoError::WrongLength("sig"));
+            }
+            if self.body.len() != 65536 {
+                return Err(ProtoError::WrongLength("body"));
             }
             Ok(())
         }
@@ -471,6 +608,234 @@ pub mod v1 {
             let mut req = sample_issue_request(2);
             req.blinded[1] = BlindedTokenRequest(vec![0u8; 255]);
             assert_eq!(req.validate(), Err(ProtoError::WrongLength("blinded")));
+        }
+
+        // ---- Task 2: host registry / snapshots / receipts / trial DTOs ----
+
+        use crate::model::ModelId;
+        use crate::wire::SnapshotBody;
+
+        fn sample_host_register_request() -> HostRegisterRequest {
+            HostRegisterRequest {
+                body: HostRegisterBody {
+                    version: 1,
+                    host_account: [0xA7u8; 32],
+                    hpke_pk: vec![0x42u8; 32],
+                    ingress_addr: "127.0.0.1:7000".into(),
+                    models: vec![ModelId("llama-3.1-8b".into())],
+                },
+                sig: vec![0xCDu8; 64],
+                pow_nonce: vec![0x11u8; 8],
+            }
+        }
+
+        #[test]
+        fn host_register_request_round_trips() {
+            let req = sample_host_register_request();
+            let bytes = serde_json::to_vec(&req).expect("serialize");
+            let back: HostRegisterRequest = serde_json::from_slice(&bytes).expect("deserialize");
+            assert_eq!(back.body, req.body);
+            assert_eq!(back.sig, req.sig);
+            assert_eq!(back.pow_nonce, req.pow_nonce);
+            assert!(back.validate().is_ok());
+        }
+
+        #[test]
+        fn host_register_wrong_sig_length_fails() {
+            let mut req = sample_host_register_request();
+            req.sig = vec![0u8; 63];
+            assert_eq!(req.validate(), Err(ProtoError::WrongLength("sig")));
+        }
+
+        #[test]
+        fn host_register_wrong_pow_nonce_length_fails() {
+            let mut req = sample_host_register_request();
+            req.pow_nonce = vec![0u8; 7];
+            assert_eq!(req.validate(), Err(ProtoError::WrongLength("pow_nonce")));
+        }
+
+        #[test]
+        fn host_register_bad_version_fails() {
+            let mut req = sample_host_register_request();
+            req.body.version = 2;
+            assert_eq!(req.validate(), Err(ProtoError::WrongLength("version")));
+        }
+
+        #[test]
+        fn host_register_empty_ingress_fails() {
+            let mut req = sample_host_register_request();
+            req.body.ingress_addr.clear();
+            assert_eq!(req.validate(), Err(ProtoError::WrongLength("ingress_addr")));
+        }
+
+        #[test]
+        fn host_register_empty_hpke_pk_fails() {
+            let mut req = sample_host_register_request();
+            req.body.hpke_pk.clear();
+            assert_eq!(req.validate(), Err(ProtoError::WrongLength("hpke_pk")));
+        }
+
+        fn sample_heartbeat_request() -> HeartbeatRequest {
+            HeartbeatRequest {
+                body: HeartbeatBody {
+                    version: 1,
+                    host_account: [0xA7u8; 32],
+                    hb_counter: 42,
+                    load_bucket: 5,
+                    models: vec![ModelId("llama-3.1-8b".into())],
+                },
+                sig: vec![0xCDu8; 64],
+            }
+        }
+
+        #[test]
+        fn heartbeat_request_round_trips() {
+            let req = sample_heartbeat_request();
+            let bytes = serde_json::to_vec(&req).expect("serialize");
+            let back: HeartbeatRequest = serde_json::from_slice(&bytes).expect("deserialize");
+            assert_eq!(back.body, req.body);
+            assert_eq!(back.sig, req.sig);
+            assert!(back.validate().is_ok());
+        }
+
+        #[test]
+        fn heartbeat_wrong_sig_length_fails() {
+            let mut req = sample_heartbeat_request();
+            req.sig = vec![0u8; 65];
+            assert_eq!(req.validate(), Err(ProtoError::WrongLength("sig")));
+        }
+
+        #[test]
+        fn heartbeat_bad_version_fails() {
+            let mut req = sample_heartbeat_request();
+            req.body.version = 0;
+            assert_eq!(req.validate(), Err(ProtoError::WrongLength("version")));
+        }
+
+        fn sample_trial_register_request() -> TrialRegisterRequest {
+            TrialRegisterRequest {
+                body: TrialRegisterBody {
+                    version: 1,
+                    account: [0x1Fu8; 32],
+                },
+                pow_nonce: vec![0x22u8; 8],
+            }
+        }
+
+        #[test]
+        fn trial_register_request_round_trips() {
+            let req = sample_trial_register_request();
+            let bytes = serde_json::to_vec(&req).expect("serialize");
+            let back: TrialRegisterRequest = serde_json::from_slice(&bytes).expect("deserialize");
+            assert_eq!(back.body, req.body);
+            assert_eq!(back.pow_nonce, req.pow_nonce);
+            assert!(back.validate().is_ok());
+        }
+
+        #[test]
+        fn trial_register_wrong_pow_nonce_length_fails() {
+            let mut req = sample_trial_register_request();
+            req.pow_nonce = vec![0u8; 9];
+            assert_eq!(req.validate(), Err(ProtoError::WrongLength("pow_nonce")));
+        }
+
+        fn sample_receipt_submit() -> ReceiptSubmit {
+            ReceiptSubmit {
+                body: UsageReceiptBody {
+                    version: 1,
+                    host_account: [0xA7u8; 32],
+                    model_id: ModelId("llama-3.1-8b".into()),
+                    tier: 1,
+                    units: 7,
+                    spend_id: [0x5Au8; 32],
+                    epoch: 9,
+                    timestamp_h: 1_700_000,
+                },
+                sig: vec![0xCDu8; 64],
+            }
+        }
+
+        #[test]
+        fn receipt_submit_round_trips() {
+            let req = sample_receipt_submit();
+            let bytes = serde_json::to_vec(&req).expect("serialize");
+            let back: ReceiptSubmit = serde_json::from_slice(&bytes).expect("deserialize");
+            assert_eq!(back.body, req.body);
+            assert_eq!(back.sig, req.sig);
+            assert!(back.validate().is_ok());
+        }
+
+        #[test]
+        fn receipt_submit_wrong_sig_length_fails() {
+            let mut req = sample_receipt_submit();
+            req.sig = vec![0u8; 63];
+            assert_eq!(req.validate(), Err(ProtoError::WrongLength("sig")));
+        }
+
+        #[test]
+        fn receipt_submit_bad_version_fails() {
+            let mut req = sample_receipt_submit();
+            req.body.version = 2;
+            assert_eq!(req.validate(), Err(ProtoError::WrongLength("version")));
+        }
+
+        fn sample_snapshot_response() -> SnapshotResponse {
+            SnapshotResponse {
+                body: vec![0u8; 65536],
+                sig: vec![0xCDu8; 64],
+            }
+        }
+
+        #[test]
+        fn snapshot_response_round_trips() {
+            let resp = sample_snapshot_response();
+            let bytes = serde_json::to_vec(&resp).expect("serialize");
+            let back: SnapshotResponse = serde_json::from_slice(&bytes).expect("deserialize");
+            assert_eq!(back.body, resp.body);
+            assert_eq!(back.sig, resp.sig);
+            assert!(back.validate().is_ok());
+        }
+
+        #[test]
+        fn snapshot_response_wrong_sig_length_fails() {
+            let mut resp = sample_snapshot_response();
+            resp.sig = vec![0u8; 63];
+            assert_eq!(resp.validate(), Err(ProtoError::WrongLength("sig")));
+        }
+
+        #[test]
+        fn snapshot_response_wrong_body_length_fails() {
+            let mut resp = sample_snapshot_response();
+            resp.body = vec![0u8; 65535];
+            assert_eq!(resp.validate(), Err(ProtoError::WrongLength("body")));
+        }
+
+        #[test]
+        fn snapshot_body_postcard_round_trips_through_response() {
+            // Sanity: a real SnapshotBody postcard-encodes then pads to the
+            // 64 KiB bucket the SnapshotResponse validate() requires.
+            let body = SnapshotBody {
+                header: crate::wire::SnapshotHeader {
+                    epoch: 7,
+                    issued_at_h: 1_700_000,
+                    issuer_key_id: [0x11u8; 32],
+                },
+                hosts: vec![crate::wire::SnapshotHostEntry {
+                    host_account: [0xAAu8; 32],
+                    hpke_pk: vec![0x42u8; 32],
+                    models: vec![ModelId("llama-3.1-8b".into())],
+                    tier_flags: 1,
+                    load_bucket: 2,
+                    freshness_bucket: 3,
+                }],
+            };
+            let mut enc = postcard::to_stdvec(&body).expect("postcard encode");
+            enc.resize(65536, 0);
+            let resp = SnapshotResponse {
+                body: enc,
+                sig: vec![0xCDu8; 64],
+            };
+            assert!(resp.validate().is_ok());
         }
     }
 }

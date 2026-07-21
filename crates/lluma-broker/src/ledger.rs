@@ -8,17 +8,9 @@ use redb::{ReadableDatabase, ReadableTable};
 use lluma_core::wire::AccountId;
 use lluma_issuer::ledger::CreditLedger;
 use lluma_issuer::IssuerError;
-use serde::{Deserialize, Serialize};
 
 use crate::error::BrokerError;
-use crate::store::{Store, LEDGER};
-
-#[derive(Debug, Default, Serialize, Deserialize)]
-struct LedgerRow {
-    balance: u64,
-    earned: u64,
-    spent: u64,
-}
+use crate::store::{LedgerRow, Store, LEDGER};
 
 pub struct RedbLedger {
     store: Store,

@@ -101,6 +101,7 @@ fn issuer_state() -> AppState {
         idem: Arc::new(IssueIdempotencyCache::new()),
         admin_secret: Arc::new(ADMIN.to_string()),
         now_unix_s: real_now,
+        issued_observer: None,
     }
 }
 

@@ -1,0 +1,26 @@
+# VPS-B — co-located issuer+broker origin (bind to loopback; only the gateway reaches it).
+# TEMPLATE — fill EnvironmentFile and paths. NOT installed/enabled by this repo.
+[Unit]
+Description=Lluma co-located issuer+broker origin
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lluma
+Group=lluma
+# All config via env; see ops/deploy/broker.env.example.
+EnvironmentFile=/etc/lluma/broker.env
+ExecStart=/usr/local/bin/lluma-broker
+Restart=on-failure
+RestartSec=2
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/lluma
+AmbientCapabilities=
+
+[Install]
+WantedBy=multi-user.target

@@ -7,16 +7,27 @@
 //! signed snapshots, receipt ingest, and the redeem-forward service are the
 //! remaining #4 work (see the design spec).
 
+pub mod config;
+pub mod counters;
 pub mod error;
 pub mod hosts;
 pub mod ledger;
+pub mod receipts;
+pub mod registry;
 pub mod service;
+pub mod snapshot;
 pub mod spent;
 pub mod store;
+pub mod trial;
 
+pub use config::BrokerConfig;
 pub use error::BrokerError;
 pub use hosts::{HostEntry, StaticHostDirectory};
 pub use ledger::RedbLedger;
-pub use service::{router, BrokerState};
+pub use receipts::{ingest, IngestOutcome};
+pub use registry::{heartbeat, register, HeartbeatOutcome, RegisterOutcome};
 pub use spent::RedbSpentSet;
+pub use service::{ingress_router, router, BrokerState};
+pub use snapshot::{publish as publish_snapshot, verify as verify_snapshot, SNAPSHOT_BUCKET};
 pub use store::Store;
+pub use trial::{grant_trial, TrialOutcome};

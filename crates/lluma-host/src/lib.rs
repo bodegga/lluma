@@ -8,6 +8,9 @@
 //! plaintext but NEVER the originator IP (its only inbound peer is the broker)
 //! and the response is E2E-sealed so no relay/gateway/broker can read it.
 
+pub mod openai;
+pub use openai::OpenAiUpstream;
+
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -22,10 +25,31 @@ use axum::{Json, Router};
 use lluma_core::proto::v1::{ExecResponse, HostExecRequest};
 use lluma_core::wire::HostSecretKey;
 
+/// An upstream failure. Opaque (L8) — never carries prompt bytes or a provider
+/// `Display` to the wire.
+#[derive(Debug, thiserror::Error)]
+pub enum UpstreamError {
+    #[error("upstream unavailable")]
+    Transport,
+    #[error("upstream status")]
+    Status,
+    #[error("upstream decode")]
+    Decode,
+    #[error("bad prompt encoding")]
+    BadPrompt,
+    #[error("encode error")]
+    Encode,
+}
+
 /// The upstream model. One method so a real OpenAI-compatible adapter is a thin
-/// swap for `EchoUpstream`. Boxed future → object-safe (`Arc<dyn Upstream>`).
+/// swap for `EchoUpstream`. Fallible — a real model call can time out or error,
+/// and the host must return a proper 502 rather than seal a fake "answer".
+/// Boxed future → object-safe (`Arc<dyn Upstream>`).
 pub trait Upstream: Send + Sync {
-    fn complete<'a>(&'a self, prompt: &'a [u8]) -> Pin<Box<dyn Future<Output = Vec<u8>> + Send + 'a>>;
+    fn complete<'a>(
+        &'a self,
+        prompt: &'a [u8],
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, UpstreamError>> + Send + 'a>>;
 }
 
 /// Echo stub: returns `sentinel ‖ prompt`. Proves the routing/crypto invariant
@@ -35,10 +59,13 @@ pub struct EchoUpstream {
 }
 
 impl Upstream for EchoUpstream {
-    fn complete<'a>(&'a self, prompt: &'a [u8]) -> Pin<Box<dyn Future<Output = Vec<u8>> + Send + 'a>> {
+    fn complete<'a>(
+        &'a self,
+        prompt: &'a [u8],
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, UpstreamError>> + Send + 'a>> {
         let mut out = self.sentinel.clone();
         out.extend_from_slice(prompt);
-        Box::pin(async move { out })
+        Box::pin(async move { Ok(out) })
     }
 }
 
@@ -72,7 +99,11 @@ async fn exec(State(st): State<HostState>, body: Bytes) -> Response {
             Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "seal_invalid"),
         };
 
-    let answer = st.upstream.complete(&prompt).await;
+    let answer = match st.upstream.complete(&prompt).await {
+        Ok(a) => a,
+        // Upstream failed — return a 502; never seal a fabricated answer.
+        Err(_) => return err(StatusCode::BAD_GATEWAY, "upstream"),
+    };
 
     // Seal the response to the client's session key (single final chunk).
     let mut rng = rand_core::OsRng;

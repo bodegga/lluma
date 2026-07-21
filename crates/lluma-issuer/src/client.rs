@@ -323,6 +323,7 @@ mod tests {
                     .map(|d| d.as_secs())
                     .unwrap_or(0)
             },
+            issued_observer: None,
         };
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await

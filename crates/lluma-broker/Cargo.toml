@@ -18,6 +18,7 @@ postcard = { workspace = true }
 blake3 = { workspace = true }
 thiserror = { workspace = true }
 tracing = "0.1"
+tracing-subscriber = "0.3"
 
 [dev-dependencies]
 tokio = { workspace = true }

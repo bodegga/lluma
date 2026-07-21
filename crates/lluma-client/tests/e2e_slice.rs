@@ -13,7 +13,9 @@ use axum::Router;
 use base64::Engine;
 use tokio::net::TcpListener;
 
-use lluma_broker::{router as broker_router, BrokerState, HostEntry, RedbSpentSet, StaticHostDirectory, Store};
+use lluma_broker::{
+    counters, heartbeat, register, router as broker_router, BrokerConfig, BrokerState, Store,
+};
 use lluma_client::Client;
 use lluma_gateway::{router as gateway_router, GatewayConfig};
 use lluma_host::{router as host_router, EchoUpstream, HostState};
@@ -24,7 +26,11 @@ use lluma_issuer::service::{router as issuer_router, AppState};
 use lluma_issuer::spent_set::{InMemorySpentSet, SpentSet};
 use lluma_relay::{router as relay_router, RateLimitConfig, RelayConfig};
 
-use lluma_core::wire::{AccountId, Mnemonic};
+use lluma_core::proto::v1::{HeartbeatRequest, HostRegisterRequest};
+use lluma_core::wire::{HeartbeatBody, HostRegisterBody, Mnemonic};
+use lluma_crypto::account::{
+    derive_keypair_from_seed, heartbeat_sign, host_register_sign, pow_solve, POW_HOST_DOMAIN,
+};
 
 const ADMIN: &str = "test-admin";
 const PROMPT_SENTINEL: &[u8] = b"PROMPT-CANARY-3f9a2b7c1d";
@@ -127,7 +133,17 @@ async fn anonymous_request_reaches_model_and_returns_invariant_holds() {
     };
     let host_url = serve(wrap(host_router(host_state), &host_rec)).await;
 
-    // ---- issuer app state (shares the issuer keypair) ----
+    // ---- shared co-located store + broker config (issuer+broker on one DB, R6) ----
+    let store = Store::open(&tmp_redb()).unwrap();
+    let cfg = BrokerConfig::for_test(); // low PoW difficulty, loopback ingress ok
+    // The serving host's Ed25519 ACCOUNT key (distinct from its HPKE `host_pk`).
+    let (host_acct_sk, host_acct_pk) =
+        lluma_crypto::account::derive_keypair_from_seed(&Mnemonic([9u8; 16])).unwrap();
+    let host_account: [u8; 32] = host_acct_pk.0.as_slice().try_into().unwrap();
+
+    // ---- issuer app state; issued-counter wired to the co-located broker store
+    // so the redeem tripwire (redeemed <= issued) sees issuance ----
+    let store_obs = store.clone();
     let issuer_state = AppState {
         keys: Arc::new(EpochKeys { epoch: 1, secret: issuer_sk, public: issuer_pk.clone() }),
         ledger: Arc::new(InMemoryLedger::new()) as Arc<dyn CreditLedger>,
@@ -135,18 +151,45 @@ async fn anonymous_request_reaches_model_and_returns_invariant_holds() {
         idem: Arc::new(IssueIdempotencyCache::new()),
         admin_secret: Arc::new(ADMIN.to_string()),
         now_unix_s: real_now,
+        issued_observer: Some(Arc::new(move |epoch, n| {
+            let _ = counters::bump_issued(&store_obs, epoch, n);
+        })),
     };
 
-    // ---- broker state (same issuer pk; durable spent-set; static host) ----
-    let hosts = StaticHostDirectory::new(vec![HostEntry {
-        host_account: AccountId([1; 32]),
-        ingress_url: host_url.clone(),
-        host_pk: host_pk.clone(),
-    }]);
+    // ---- register + admit the serving host into the durable registry ----
+    let reg_body = HostRegisterBody {
+        version: 1,
+        host_account,
+        hpke_pk: host_pk.0.clone(),
+        ingress_addr: host_url.clone(),
+        models: vec![],
+    };
+    let reg_sig = host_register_sign(&host_acct_sk, &reg_body).unwrap();
+    let nonce = pow_solve(POW_HOST_DOMAIN, &host_account, &cfg.epoch_salt, cfg.pow_difficulty);
+    let reg = HostRegisterRequest { body: reg_body, sig: reg_sig.0, pow_nonce: nonce.to_vec() };
+    register(&store, &reg, &cfg, 100).unwrap();
+    for (c, t) in [(1u64, 130u64), (2, 160), (3, 190)] {
+        let hb_body = HeartbeatBody {
+            version: 1,
+            host_account,
+            hb_counter: c,
+            load_bucket: 0,
+            models: vec![],
+        };
+        let hb_sig = heartbeat_sign(&host_acct_sk, &hb_body).unwrap();
+        heartbeat(&store, &HeartbeatRequest { body: hb_body, sig: hb_sig.0 }, t, &cfg).unwrap();
+    }
+
+    // ---- broker state (same issuer pk; the shared durable store; registry) ----
+    let (reg_key_sk, _reg_key_pk) =
+        derive_keypair_from_seed(&Mnemonic([11u8; 16])).unwrap();
     let broker_state = BrokerState::new(
         issuer_pk.clone(),
-        Arc::new(RedbSpentSet::new(Store::open(&tmp_redb()).unwrap(), 1)),
-        hosts,
+        store.clone(),
+        cfg.clone(),
+        reg_key_sk,
+        ADMIN.to_string(),
+        real_now,
     );
 
     // ---- merged origin (issuer + broker) behind one recorder ----
@@ -188,7 +231,7 @@ async fn anonymous_request_reaches_model_and_returns_invariant_holds() {
     assert_eq!(gr.status(), 200);
 
     // ---- the anonymous request ----
-    let client = Client::new(&relay_url, gw_kc, acct_sk, acct_pk.clone(), host_pk);
+    let client = Client::new(&relay_url, gw_kc, acct_sk, acct_pk.clone(), host_pk, host_account);
     let kc = client.key_config().await.expect("key-config");
     let mut tokens = client.acquire(&kc, 2).await.expect("acquire");
     let token = tokens.remove(0);

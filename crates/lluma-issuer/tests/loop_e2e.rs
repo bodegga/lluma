@@ -129,6 +129,7 @@ fn state_from_keys(keys: EpochKeys) -> AppState {
         idem: Arc::new(IssueIdempotencyCache::new()),
         admin_secret: Arc::new(ADMIN.to_string()),
         now_unix_s: real_now,
+        issued_observer: None,
     }
 }
 

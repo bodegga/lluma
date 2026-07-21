@@ -134,3 +134,98 @@ impl AsRef<[u8]> for IssueSignature {
         &self.0
     }
 }
+
+/// Canonical host-registration body, signed by the host's account Ed25519 key
+/// to join the registry. `hpke_pk` is the host's HPKE KEM public key; models is
+/// the (non-empty) set of `ModelId`s the host is offering.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HostRegisterBody {
+    pub version: u8,
+    pub host_account: [u8; 32],
+    pub hpke_pk: Vec<u8>,
+    pub ingress_addr: String,
+    pub models: Vec<ModelId>,
+}
+
+/// Canonical heartbeat body, signed by the host's account Ed25519 key. Carries
+/// load/freshness buckets the broker folds into the next signed snapshot.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HeartbeatBody {
+    pub version: u8,
+    pub host_account: [u8; 32],
+    pub hb_counter: u64,
+    pub load_bucket: u8,
+    pub models: Vec<ModelId>,
+}
+
+/// Canonical anti-Sybil trial-registration body. The issuer credits a one-time
+/// trial allowance to `account` on acceptance. This body is NOT signed — the
+/// request is gated by proof-of-work (nonce carried in the `TrialRegisterRequest`
+/// DTO, domain `lluma-pow-trial-v1`), which binds the grant to this account.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrialRegisterBody {
+    pub version: u8,
+    pub account: [u8; 32],
+}
+
+/// One host as it appears in the signed registry snapshot. NOTE: deliberately
+/// carries NO `ingress_addr` — clients never learn host network addresses.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotHostEntry {
+    pub host_account: [u8; 32],
+    pub hpke_pk: Vec<u8>,
+    pub models: Vec<ModelId>,
+    pub tier_flags: u8,
+    pub load_bucket: u8,
+    pub freshness_bucket: u8,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotHeader {
+    pub epoch: u64,
+    pub issued_at_h: u32,
+    pub issuer_key_id: [u8; 32],
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SnapshotBody {
+    pub header: SnapshotHeader,
+    pub hosts: Vec<SnapshotHostEntry>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn snapshot_body_postcard_round_trips() {
+        let body = SnapshotBody {
+            header: SnapshotHeader {
+                epoch: 42,
+                issued_at_h: 1_700_000,
+                issuer_key_id: [0x11u8; 32],
+            },
+            hosts: vec![
+                SnapshotHostEntry {
+                    host_account: [0xAAu8; 32],
+                    hpke_pk: vec![0x42u8; 32],
+                    models: vec![ModelId("llama-3.1-8b".into())],
+                    tier_flags: 1,
+                    load_bucket: 2,
+                    freshness_bucket: 3,
+                },
+                SnapshotHostEntry {
+                    host_account: [0xBBu8; 32],
+                    hpke_pk: vec![0x43u8; 32],
+                    models: vec![ModelId("qwen2.5-7b".into())],
+                    tier_flags: 0,
+                    load_bucket: 7,
+                    freshness_bucket: 7,
+                },
+            ],
+        };
+        let enc = postcard::to_stdvec(&body).expect("encode");
+        let back: SnapshotBody = postcard::from_bytes(&enc).expect("decode");
+        assert_eq!(back, body);
+    }
+}

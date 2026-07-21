@@ -12,3 +12,4 @@ base64 = "0.22"
 
 [dev-dependencies]
 serde_json = { workspace = true }
+postcard = { workspace = true }

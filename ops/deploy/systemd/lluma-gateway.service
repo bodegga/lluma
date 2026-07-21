@@ -1,0 +1,22 @@
+# VPS-B — OHTTP gateway (forwards allowlisted paths to the loopback origin).
+# TEMPLATE — NOT installed/enabled by this repo.
+[Unit]
+Description=Lluma OHTTP gateway
+After=network-online.target lluma-broker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=lluma
+Group=lluma
+EnvironmentFile=/etc/lluma/gateway.env
+ExecStart=/usr/local/bin/lluma-gateway
+Restart=on-failure
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

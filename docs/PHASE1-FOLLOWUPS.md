@@ -1,4 +1,41 @@
-# Phase 1 Follow-ups (carried from the Phase 0 whole-branch review)
+# Phase 1 Follow-ups
+
+## From the Full #4 broker whole-branch review (Fable, 2026-07-20) — pre-production
+
+Verdict was MERGE-AFTER-FIXES; the one fix-before-merge item (I1: trial register on
+the core router) landed. These remain, none blocking the merged milestone:
+
+- **I2 — `spawn_blocking` for store calls.** Broker HTTP handlers call the sync
+  redb store (`with_write`/`with_read`) inline on the tokio executor. No
+  correctness bug (no txn crosses `.await`), but a commit fsync blocks a worker
+  thread. Wrap store calls in `spawn_blocking` before production scale.
+- **I3 — snapshot fixed-cadence cache.** `GET /v1/snapshot` rebuilds + signs the
+  full 64 KiB per request on the redeem listener. Implement the R10 60 s cadence
+  rebuild in `main.rs` serving a cached artifact (and/or move snapshot GET off the
+  redeem listener) so an unauthenticated snapshot flood can't soft-DoS redeem.
+- **M2 — `issued` bump failure is swallowed** (co-located `issued_observer` logs +
+  continues). A persistent storage fault there undercounts `issued` and can later
+  surface as a spurious tripwire refusal (fail-safe). Runbook note; consider
+  making issuance fail if the counter bump fails.
+- **M4 — SSRF/redirect client fails open on builder error.** `BrokerState::new`
+  (and `openai.rs`) fall back to a redirect-following `reqwest::Client::new()` if
+  the redirect-none builder fails. Near-impossible, but a security control should
+  fail closed — thread a `Result` or refuse to operate.
+- **M7 — OpenAI adapter egress client has no `redirect::Policy::none()`.** Lower
+  risk (operator-configured provider, not attacker SSRF into internal infra), but
+  a redirecting provider URL is a footgun.
+- **Multi-epoch counter keying** (M1): `/v1/exec` keys the redeem counter by
+  `cfg.epoch`; derive it from the token's `key_id` before accepting k/k−1 tokens
+  across a key rotation (see the `TODO(multi-epoch)` in `service.rs`).
+- **Gateway OHTTP key persistence**: persist the gateway key across restarts before
+  real traffic (clients pin it; regenerating breaks pinning).
+- **broker_e2e coverage gaps** (M8, partial): add the explicit broker-transcript
+  unlinkability sweep + the plan's proptests (self-dealing zero-sum is covered by
+  construction; concurrent-ledger-non-negative proptest not yet in this crate).
+
+---
+
+## Carried from the Phase 0 whole-branch review
 
 These items were identified during the Phase 0 final code review (Fable, 2026-07-15)
 and deliberately deferred. None block Phase 0. Several **must** be fixed as part of the
