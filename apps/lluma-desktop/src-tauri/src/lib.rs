@@ -2,6 +2,7 @@
 
 mod account;
 mod client;
+mod host;
 mod settings;
 mod types;
 

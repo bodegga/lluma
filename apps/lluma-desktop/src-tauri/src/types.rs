@@ -14,10 +14,22 @@ pub enum UpstreamKind {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct HostConfig {
     pub upstream: UpstreamKind,
+    /// Public address the broker forwards sealed prompts to, e.g.
+    /// `http://203.0.113.9:9000`. Must be reachable from the internet.
     pub ingress_addr: String,
     pub openai_base: String,
     pub openai_model: String,
     pub openai_api_key: String,
+    /// Broker ingress URL for register/heartbeat (operator-provided; direct,
+    /// not via the relay). Empty ⇒ serve-only mode (won't receive broker work).
+    pub broker_ingress: String,
+    /// Broker epoch salt (base64) needed to solve the registration PoW. Not
+    /// yet published; operator-provided today.
+    pub epoch_salt_b64: String,
+    /// Registration PoW difficulty in leading zero bits (broker policy).
+    pub pow_difficulty: u32,
+    /// Model label this host advertises in the registry (non-empty required).
+    pub model_id: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
