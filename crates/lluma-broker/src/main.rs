@@ -112,8 +112,13 @@ async fn main() -> Result<(), String> {
 
     let broker_state = BrokerState::new(issuer_pk, store, cfg, registry_sk, admin_secret, now_unix_s);
 
-    // Core listener: issuer endpoints (key-config/issue/redeem) + broker core
-    // (exec, snapshot GET) — this is the origin the gateway forwards to.
+    // Core listener: issuer endpoints (key-config/issue) + broker core (exec,
+    // trial register, snapshot GET) — the origin the gateway forwards to.
+    // NOTE (Fable M3): the gateway path-allowlist MUST NOT expose the issuer's
+    // legacy `/v1/redeem` in the co-located build — a token burned there sets
+    // SPENT but bypasses SPEND_HOST + the redeemed tripwire counter. The broker
+    // is the sole redeemer via `/v1/exec` (ADR-0003). See ops/deploy/broker.env.example
+    // (LLUMA_GATEWAY_PREFIXES omits /v1/redeem).
     let core_app = issuer_router(issuer_state).merge(core_router(broker_state.clone()));
     // Ingress listener: host registration/heartbeat/receipt, trial, admin.
     let ingress_app = ingress_router(broker_state);

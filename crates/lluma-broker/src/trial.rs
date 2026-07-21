@@ -7,10 +7,12 @@
 //! trivializes any feasible difficulty). All state moves in ONE write
 //! transaction (TRIAL_ACCTS + TRIAL_BUDGET + LEDGER + COUNTERS).
 //!
-//! The HTTP layer (see broker main) MUST return a **uniform** error for both
-//! `AlreadyGranted` and `BudgetExhausted` refusals so budget state leaks no
-//! per-account signal. The endpoint is mounted on the relay-routed, gateway-
-//! allowlisted issuer router — never the direct host-ingress listener (leak L16).
+//! The HTTP layer (see broker `service.rs`) MUST return a **uniform** error for
+//! both `AlreadyGranted` and `BudgetExhausted` refusals so budget state leaks no
+//! per-account signal. `/v1/register` is mounted on the broker **core** router —
+//! the relay→gateway-reachable, path-allowlisted surface — never the direct
+//! host-ingress listener, so a consumer's `account_pk` never lands at the broker
+//! alongside its IP (leak L16).
 
 use redb::ReadableTable;
 

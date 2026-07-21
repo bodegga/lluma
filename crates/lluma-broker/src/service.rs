@@ -1,8 +1,10 @@
 //! Broker HTTP surface — two independently-bound routers (R9 split ingress):
 //!
-//! - core: `POST /v1/exec` (redeem-and-forward), `GET /v1/snapshot`
-//! - ingress: `POST /v1/host/register`, `/v1/heartbeat`, `/v1/receipt`, `/v1/register`
-//!   (anti-Sybil trial), and `GET /admin/invariant`
+//! - core (client-facing via relay→gateway): `POST /v1/exec` (redeem-and-forward),
+//!   `POST /v1/register` (anti-Sybil trial — MUST be on the relay-routed path so a
+//!   consumer never hands the broker `IP + account_pk`, leak L16), `GET /v1/snapshot`
+//! - ingress (host/operator): `POST /v1/host/register`, `/v1/heartbeat`,
+//!   `/v1/receipt`, and `GET /admin/invariant`
 //!
 //! A heartbeat/receipt/registration flood on the ingress listener therefore
 //! cannot starve redeem on the core listener.
@@ -82,22 +84,25 @@ impl BrokerState {
     }
 }
 
-/// The core router: redeem + snapshot GET (client-facing via relay/gateway).
+/// The core router: redeem, trial registration, and snapshot GET — all
+/// client-facing via the relay→gateway path. Trial register lives here (NOT on
+/// ingress) so a consumer's `account_pk` never lands at the broker alongside its
+/// IP (leak L16); the gateway path-allowlist gates access.
 pub fn router(state: BrokerState) -> Router {
     Router::new()
         .route("/v1/exec", post(exec))
+        .route("/v1/register", post(trial_register))
         .route("/v1/snapshot", get(snapshot_get))
         .with_state(state)
 }
 
-/// The ingress router: host registration/heartbeat/receipt, trial registration,
-/// and operator invariant status. Bind this on a SEPARATE listener from `router`.
+/// The ingress router: host registration/heartbeat/receipt and operator
+/// invariant status. Bind this on a SEPARATE listener from `router`.
 pub fn ingress_router(state: BrokerState) -> Router {
     Router::new()
         .route("/v1/host/register", post(host_register))
         .route("/v1/heartbeat", post(host_heartbeat))
         .route("/v1/receipt", post(receipt_submit))
-        .route("/v1/register", post(trial_register))
         .route("/admin/invariant", get(admin_invariant))
         .with_state(state)
 }
@@ -136,6 +141,11 @@ async fn exec(State(st): State<BrokerState>, body: Bytes) -> Response {
     // Spend BEFORE forwarding, atomically: SPENT + SPEND_HOST + redeemed counter.
     // A tripped invariant (redeemed > issued) rolls the whole txn back (Err) so
     // the token is NOT recorded spent, and we refuse + alarm-log.
+    // TODO(multi-epoch): key the counter by the TOKEN's epoch (derived from
+    // key_id), not cfg.epoch. Sound for the single-epoch MVP (one accepted
+    // key_id; issued is bumped at the matching issuer epoch), but a future key
+    // rotation must derive the epoch here before accepting k/k-1 tokens (else
+    // the false-trip that Fable's must-fix 5 prevented reappears).
     let epoch = st.cfg.epoch;
     let host_account = req.host_account;
     let spend_outcome = st.store.with_write(move |w| {
@@ -229,6 +239,12 @@ async fn snapshot_get(State(st): State<BrokerState>) -> Response {
             Ok(b) => (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], b).into_response(),
             Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
         },
+        Err(BrokerError::SnapshotTooLarge) => {
+            // Fail closed + ALARM: the active-host set no longer fits the fixed
+            // bucket. Never silently grow it (would leak host count, L4).
+            tracing::error!("ALARM: snapshot exceeds fixed 64 KiB bucket — refusing to publish");
+            err(StatusCode::INTERNAL_SERVER_ERROR, "internal")
+        }
         Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     }
 }
@@ -293,11 +309,23 @@ async fn trial_register(State(st): State<BrokerState>, body: Bytes) -> Response 
 
 // ---- ingress: operator invariant status ----
 
+/// Constant-time byte compare (length is allowed to leak; contents are not).
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut d = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        d |= x ^ y;
+    }
+    d == 0
+}
+
 async fn admin_invariant(State(st): State<BrokerState>, headers: HeaderMap) -> Response {
     let ok = headers
         .get("x-admin-secret")
         .and_then(|v| v.to_str().ok())
-        .map(|v| v == st.admin_secret.as_str())
+        .map(|v| ct_eq(v.as_bytes(), st.admin_secret.as_bytes()))
         .unwrap_or(false);
     if !ok {
         return err(StatusCode::FORBIDDEN, "forbidden");

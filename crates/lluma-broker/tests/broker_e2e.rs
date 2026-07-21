@@ -284,6 +284,52 @@ async fn durable_respend_survives_restart() {
 }
 
 #[tokio::test]
+async fn unknown_host_refused_without_burning_token() {
+    // Resolve-before-spend: naming an unregistered host must refuse WITHOUT
+    // burning the token, so the same token still redeems once a host is admitted.
+    let (issuer_pk, issuer_sk) = issuer_keys();
+    let key_id = *blake3::hash(&issuer_pk.0).as_bytes();
+    let cfg = BrokerConfig::for_test();
+    let store = Store::open(&tmp_redb()).unwrap();
+    counters::bump_issued(&store, cfg.epoch, 4).unwrap();
+
+    let hits = Arc::new(AtomicU64::new(0));
+    let host_url = mock_host(hits.clone()).await;
+    // Derive the host's account but DO NOT admit it yet.
+    let (sk, pk) = derive_keypair_from_seed(&Mnemonic([1u8; 16])).unwrap();
+    let acct: [u8; 32] = pk.0.as_slice().try_into().unwrap();
+
+    let (bstate, _) = broker(store.clone(), cfg.clone(), issuer_pk.clone());
+    let core = spawn(core_router(bstate)).await;
+
+    let t = mint_token(&issuer_pk, &issuer_sk);
+    let (s_no_host, _) = post_json(&core, "/v1/exec", exec_body(key_id, acct, &t)).await;
+    assert_eq!(s_no_host, 502, "unknown host ⇒ no_host (not a spend)");
+    assert_eq!(hits.load(Ordering::SeqCst), 0);
+
+    // Admit the host via pub fns (deterministic timestamps); the SAME token now
+    // redeems because it was never burned.
+    let body = HostRegisterBody {
+        version: 1,
+        host_account: acct,
+        hpke_pk: vec![0x42; 32],
+        ingress_addr: host_url.clone(),
+        models: vec![],
+    };
+    let rsig = host_register_sign(&sk, &body).unwrap();
+    let nonce = pow_solve(POW_HOST_DOMAIN, &acct, &cfg.epoch_salt, cfg.pow_difficulty);
+    register(&store, &HostRegisterRequest { body, sig: rsig.0, pow_nonce: nonce.to_vec() }, &cfg, 1000).unwrap();
+    for i in 1..=3u64 {
+        let hb = HeartbeatBody { version: 1, host_account: acct, hb_counter: i, load_bucket: 0, models: vec![] };
+        let s = heartbeat_sign(&sk, &hb).unwrap();
+        heartbeat(&store, &HeartbeatRequest { body: hb, sig: s.0 }, 1000 + i * cfg.heartbeat_interval_s, &cfg).unwrap();
+    }
+    let (s_ok, _) = post_json(&core, "/v1/exec", exec_body(key_id, acct, &t)).await;
+    assert_eq!(s_ok, 200, "the un-burned token redeems once the host is admitted");
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
 async fn tripwire_refuses_redeem_beyond_issued() {
     let (issuer_pk, issuer_sk) = issuer_keys();
     let key_id = *blake3::hash(&issuer_pk.0).as_bytes();
