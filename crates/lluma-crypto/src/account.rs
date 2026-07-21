@@ -363,13 +363,36 @@ fn derive_kek(passphrase: &str, salt: &[u8]) -> Result<[u8; 32]> {
     Ok(out)
 }
 
-/// Seal a mnemonic under a passphrase into an authenticated keystore blob.
-pub fn seal_keystore(
+/// Parse a BIP-39 mnemonic phrase (English, 12 words / 16 bytes entropy) into a
+/// [`Mnemonic`]. Any invalid phrase or non-16-byte entropy is a `Derivation`
+/// error.
+pub fn mnemonic_from_phrase(phrase: &str) -> Result<Mnemonic> {
+    let m = Bip39Mnemonic::parse_normalized(phrase.trim())
+        .map_err(|e| CryptoError::Derivation(e.to_string()))?;
+    let entropy = m.to_entropy();
+    let e16: [u8; 16] = entropy
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::Derivation("expected a 12-word (128-bit) mnemonic".into()))?;
+    Ok(Mnemonic(e16))
+}
+
+/// Render a [`Mnemonic`] back to its 12-word BIP-39 phrase (for user backup).
+pub fn mnemonic_to_phrase(mnemonic: &Mnemonic) -> Result<String> {
+    let m = Bip39Mnemonic::from_entropy(&mnemonic.0)
+        .map_err(|e| CryptoError::Derivation(e.to_string()))?;
+    Ok(m.to_string())
+}
+
+/// Seal arbitrary bytes under a passphrase into an authenticated blob, using the
+/// same header layout, Argon2id KEK, and XChaCha20-Poly1305 AEAD as the
+/// keystore. Used for the encrypted local token store as well as the keystore.
+pub fn seal_bytes(
     // Pass a cryptographically secure RNG (`OsRng`) in production; a seeded RNG
     // is for tests only.
     rng: &mut (impl RngCore + CryptoRng),
     passphrase: &str,
-    mnemonic: &Mnemonic,
+    plaintext: &[u8],
 ) -> Result<KeystoreBlob> {
     let mut salt = [0u8; KS_SALT_LEN];
     let mut nonce = [0u8; KS_NONCE_LEN];
@@ -391,7 +414,7 @@ pub fn seal_keystore(
         .encrypt(
             XNonce::from_slice(&nonce),
             Payload {
-                msg: &mnemonic.0,
+                msg: plaintext,
                 aad: &header,
             },
         )
@@ -402,19 +425,13 @@ pub fn seal_keystore(
     Ok(KeystoreBlob(blob))
 }
 
-/// Open a sealed keystore. Wrong passphrase or any tamper returns
-/// `CryptoError::AuthFailed` — never a garbage mnemonic.
-pub fn open_keystore(passphrase: &str, blob: &KeystoreBlob) -> Result<Mnemonic> {
+/// Open a blob sealed by [`seal_bytes`], returning the plaintext. Wrong
+/// passphrase or any tamper returns `CryptoError::AuthFailed`.
+pub fn open_bytes(passphrase: &str, blob: &KeystoreBlob) -> Result<Vec<u8>> {
     let b = &blob.0;
     if b.len() < KS_HEADER_LEN + 16 || b[0..4] != KS_MAGIC {
         return Err(CryptoError::AuthFailed);
     }
-    // Gate on version + stored Argon2 params BEFORE deriving. The header
-    // (incl. these params) is already bound as AEAD AAD in `seal_keystore`, so
-    // a tampered param fails the tag check too; this explicit check also
-    // rejects a well-formed-but-foreign blob whose version/params we don't
-    // support, and it ensures we never feed attacker-controlled m/t/p into
-    // Argon2 — we always derive with the compile-time v1 constants.
     let version = b[4];
     let m_cost = u32::from_le_bytes([b[5], b[6], b[7], b[8]]);
     let t_cost = u32::from_le_bytes([b[9], b[10], b[11], b[12]]);
@@ -431,7 +448,7 @@ pub fn open_keystore(passphrase: &str, blob: &KeystoreBlob) -> Result<Mnemonic> 
 
     let kek = derive_kek(passphrase, salt)?;
     let cipher = XChaCha20Poly1305::new(kek.as_ref().into());
-    let pt = cipher
+    cipher
         .decrypt(
             XNonce::from_slice(nonce),
             Payload {
@@ -439,7 +456,27 @@ pub fn open_keystore(passphrase: &str, blob: &KeystoreBlob) -> Result<Mnemonic> 
                 aad: header,
             },
         )
-        .map_err(|_| CryptoError::AuthFailed)?;
+        .map_err(|_| CryptoError::AuthFailed)
+}
+
+/// Seal a mnemonic under a passphrase into an authenticated keystore blob.
+pub fn seal_keystore(
+    // Pass a cryptographically secure RNG (`OsRng`) in production; a seeded RNG
+    // is for tests only.
+    rng: &mut (impl RngCore + CryptoRng),
+    passphrase: &str,
+    mnemonic: &Mnemonic,
+) -> Result<KeystoreBlob> {
+    seal_bytes(rng, passphrase, &mnemonic.0)
+}
+
+/// Open a sealed keystore. Wrong passphrase or any tamper returns
+/// `CryptoError::AuthFailed` — never a garbage mnemonic.
+pub fn open_keystore(passphrase: &str, blob: &KeystoreBlob) -> Result<Mnemonic> {
+    // Delegates to `open_bytes` (which gates version + stored Argon2 params
+    // before deriving, and always derives with the compile-time v1 constants),
+    // then enforces the 16-byte mnemonic shape.
+    let pt = open_bytes(passphrase, blob)?;
     let entropy: [u8; 16] = pt
         .as_slice()
         .try_into()
@@ -451,6 +488,49 @@ pub fn open_keystore(passphrase: &str, blob: &KeystoreBlob) -> Result<Mnemonic> 
 mod tests {
     use super::*;
     use lluma_core::ModelId;
+
+    #[test]
+    fn seal_bytes_round_trips_and_rejects_wrong_pass() {
+        let mut rng = rand_core::OsRng;
+        let blob = seal_bytes(&mut rng, "pw", b"hello world payload").unwrap();
+        assert_eq!(open_bytes("pw", &blob).unwrap(), b"hello world payload");
+        assert!(open_bytes("nope", &blob).is_err());
+    }
+
+    #[test]
+    fn seal_bytes_handles_empty_and_large() {
+        let mut rng = rand_core::OsRng;
+        for payload in [vec![], vec![0u8; 1], vec![7u8; 4096]] {
+            let blob = seal_bytes(&mut rng, "pw", &payload).unwrap();
+            assert_eq!(open_bytes("pw", &blob).unwrap(), payload);
+        }
+    }
+
+    #[test]
+    fn keystore_still_round_trips_after_refactor() {
+        let mut rng = rand_core::OsRng;
+        let m = Mnemonic([5u8; 16]);
+        let blob = seal_keystore(&mut rng, "pw", &m).unwrap();
+        assert_eq!(open_keystore("pw", &blob).unwrap().0, m.0);
+    }
+
+    #[test]
+    fn mnemonic_phrase_round_trips_and_matches_key_derivation() {
+        let m = Mnemonic([0x3cu8; 16]);
+        let phrase = mnemonic_to_phrase(&m).unwrap();
+        assert_eq!(phrase.split_whitespace().count(), 12);
+        let back = mnemonic_from_phrase(&phrase).unwrap();
+        assert_eq!(back.0, m.0);
+        // Same phrase ⇒ same derived account.
+        let (_sk1, pk1) = derive_keypair_from_seed(&m).unwrap();
+        let (_sk2, pk2) = derive_keypair_from_seed(&back).unwrap();
+        assert_eq!(pk1.0, pk2.0);
+    }
+
+    #[test]
+    fn mnemonic_from_phrase_rejects_garbage() {
+        assert!(mnemonic_from_phrase("not a real mnemonic phrase at all nope").is_err());
+    }
 
     fn sample_body(units: u32) -> UsageReceiptBody {
         UsageReceiptBody {
