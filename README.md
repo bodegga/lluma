@@ -17,38 +17,100 @@ tokens make request entitlement unlinkable to identity.
 
 ## Status
 
-Phase 0 (Dogfood): a point-and-click desktop app that auto-detects your hardware and
-recommends a model to host, with a streaming chat UI. The BLAKE3-verified model download
-and the llama.cpp GGUF runner are implemented as library crates and land in the app in the
-next phase, alongside the anonymous network (relay + broker + credits).
+**Phase 1 (MVP) — the anonymous-inference network is built and tested.** One anonymous
+request flows `client → relay → gateway → {issuer, broker} → host → model → back`, with the
+privacy invariant asserted at every hop. Complete and green:
+
+- **Crypto** — RFC 9474 RSA blind-signature tokens, RFC 9180 HPKE end-to-end sealing, OHTTP
+  relaying, Ed25519 accounts + BIP-39/Argon2 keystore, anti-Sybil BLAKE3 proof-of-work.
+- **Transport** — `lluma-net`/`lluma-relay`/`lluma-gateway` (OHTTP; the relay is the only
+  party that sees client IPs, and only as ciphertext).
+- **Broker (#4)** — durable redb accounting, host registry (PoW register + slow admission +
+  replay-proof heartbeats + SSRF-hard ingress), signed fixed-size registry snapshots, usage
+  receipts (atomic 1-credit), a `redeemed ≤ issued` tripwire, and anti-Sybil trial grants.
+- **Serving (#5)** — an API-donor host with a generic OpenAI-compatible upstream adapter.
+
+**213 tests pass across 9 crates; `clippy -D warnings` clean.** Every crypto/protocol change was
+designed and reviewed adversarially (see *Development methodology*). Real local GGUF inference
+(`lluma-runtime` + the Tauri desktop app) needs a C toolchain and is the next build target.
 
 ## Roadmap
 
-- **Phase 0 — Dogfood:** local host app + GGUF runtime + local chat. ← *current*
-- **Phase 1 — MVP:** relay + broker + blind-token issuer + credits → anonymous inference.
+- **Phase 0 — Dogfood:** local host app + GGUF runtime + local chat. ✅
+- **Phase 1 — MVP:** relay + broker + blind-token issuer + credits → anonymous inference. ✅
 - **Phase 2 — Torrent layer:** P2P content-addressed weight distribution.
 - **Phase 3 — Decentralize:** DHT tracker, gossip health, latency beaconing, canary audits.
 - **Phase 4 — Hardening:** TEE-attested confidential tier, paranoid mode, wider clients.
 
 ## Build
 
+The 9 network crates are **pure Rust** — no C toolchain needed:
+
 ```bash
-cargo build
-cargo test
-# run the desktop app (after Task 7):
-cd apps/lluma-desktop && cargo tauri dev
+cargo test -p lluma-core -p lluma-crypto -p lluma-issuer -p lluma-net -p lluma-relay \
+           -p lluma-gateway -p lluma-broker -p lluma-host -p lluma-client --all-features
+cargo clippy --all-targets --all-features -- -D warnings
 ```
+
+`lluma-runtime` (llama.cpp GGUF runner) and the Tauri desktop app require a **C toolchain**
+(`cc`/`clang` + cmake); build those on a machine that has one.
 
 ## Repository layout
 
 ```
-crates/lluma-core       shared types, errors
-crates/lluma-runtime    hardware detection, model recommendation, GGUF runner
-crates/lluma-registry   model catalog + content-addressed download/verify
-apps/lluma-desktop      Tauri app (Contribute + Chat tabs)
-docs/                   specs, plans, architecture
-.claude/agents/         specialized subagents for building Lluma
+crates/lluma-core        shared wire types, proto DTOs, errors
+crates/lluma-crypto      blind tokens, HPKE E2E, OHTTP, accounts, PoW
+crates/lluma-issuer      blind-token issuer (issue/redeem/credits) + traits
+crates/lluma-net         libp2p/relay transport primitives + framing
+crates/lluma-relay       OHTTP relay (sees IP + ciphertext only)
+crates/lluma-gateway     OHTTP gateway (decapsulates; path-allowlisted)
+crates/lluma-broker      registry + durable accounting + receipts + snapshots + trial (redb)
+crates/lluma-host        API-donor serving host + OpenAI-compatible upstream adapter
+crates/lluma-client      consumer client (acquire tokens, exec anonymous inference)
+crates/lluma-keygen      operator key-material generator (issuer/registry/salt)
+crates/lluma-runtime     hardware detection, model recommendation, GGUF runner (needs C toolchain)
+crates/lluma-registry    model catalog + content-addressed download/verify
+apps/lluma-desktop       Tauri app (Contribute + Chat tabs; needs C toolchain)
+apps/lluma-web           marketing site (DO App Platform → lluma.bodegga.net)
+ops/deploy               production deployment (scripts, systemd units, runbook)
+docs/                    specs, plans, architecture (ADRs), handoffs
+docs/INFRA.md            production infrastructure inventory + deploy procedure
+.claude/agents/          specialized subagents for building Lluma
 ```
+
+## Development methodology
+
+Lluma is built by a small model-tiered agent team with adversarial review baked in — the
+approach that has caught real security bugs (concurrent double-debit, two SSRF bypasses
+incl. an IPv4-mapped-IPv6 filter bypass, a self-dealing inflation hole, a tripwire
+false-trip) *before* merge rather than in production:
+
+- **Reasoning & design → Fable / Opus.** Architecture, cryptography, protocol, threat
+  modeling, and ADRs use the strongest models. The `protocol-crypto-architect` subagent
+  (Fable) reviews the plan, the security-critical core, and the whole branch before any merge.
+- **Bulk implementation → GLM 5.2** via `opencode run --auto -m opencode-go/glm-5.2`, but
+  **only** for small, precisely-briefed, mechanical files (wire DTOs, signing mirrors). Every
+  brief forbids workspace-wide `cargo fmt` and out-of-crate edits; every result is
+  re-verified (`cargo test` + `clippy -D warnings`) by the controller — never trusted on its word.
+- **Security-critical code → the controller (Opus)** writes it directly: proof-of-work
+  gates, admission state machines, receipt fraud bounds, the double-spend/tripwire logic,
+  redeem paths, snapshot padding.
+- **Process → subagent-driven-development / TDD.** A task-decomposed plan, a fresh implementer
+  per task, a per-task review, and a final whole-branch review. Progress is tracked in a durable
+  ledger so work survives context loss.
+
+Non-negotiables (see [`CLAUDE.md`](CLAUDE.md)): the privacy invariant (no single party holds
+both originator IP and prompt plaintext); typed errors via `thiserror`, no `unwrap()`/`expect()`
+in library crates; BLAKE3 content addressing; green tests + clippy before any task is "done".
+
+## Deployment
+
+Production runs the ADR-0002 topology across **two distinct providers** so no single vendor
+sees both network edges (leak L10): the **relay** on one provider (Vultr) and the **co-located
+issuer+broker origin + gateway** on another (DigitalOcean), with the marketing site on DO App
+Platform and DNS on ZoneEdit. Generate operator keys with `lluma-keygen`, then follow the
+runbook. Full inventory, hostnames, and step-by-step procedure: [`docs/INFRA.md`](docs/INFRA.md)
+and [`ops/deploy/`](ops/deploy/). Deployment is operator-gated and never automatic.
 
 ## License
 
