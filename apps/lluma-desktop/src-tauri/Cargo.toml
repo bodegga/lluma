@@ -15,9 +15,24 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+base64 = "0.22"
+rand_core = { version = "0.6", features = ["getrandom"] }
+thiserror = "2"
+blake3 = "1"
+postcard = { version = "1", features = ["use-std"] }
 lluma-core = { path = "../../../crates/lluma-core" }
-lluma-runtime = { path = "../../../crates/lluma-runtime" }
+lluma-client = { path = "../../../crates/lluma-client" }
+lluma-crypto = { path = "../../../crates/lluma-crypto" }
+lluma-net = { path = "../../../crates/lluma-net" }
+lluma-host = { path = "../../../crates/lluma-host" }
 lluma-registry = { path = "../../../crates/lluma-registry" }
+lluma-runtime = { path = "../../../crates/lluma-runtime", optional = true }
+
+[features]
+default = []
+local-inference = ["dep:lluma-runtime"]
 
 [lints.rust]
 linker_messages = "allow"
