@@ -278,15 +278,6 @@ $("save-settings").addEventListener("click", async () => {
   } catch (e) { $("settings-msg").textContent = String(e); }
 });
 
-$("fetch-bootstrap").addEventListener("click", async () => {
-  try {
-    const s = await call("fetch_bootstrap");
-    $("set-gwkc").value = s.gateway_kc_b64 || "";
-    $("set-regpk").value = s.registry_pk_b64 || "";
-    toast("Fetched endpoint material from relay");
-  } catch (e) { toast(String(e), "error"); }
-});
-
 // ---- account actions ----
 function showPhrase(newAcct) {
   $("phrase-box").textContent = newAcct.recovery_phrase;

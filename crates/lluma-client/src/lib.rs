@@ -31,7 +31,13 @@ pub fn verify_bootstrap(
     let sig = ReceiptSignature(sb.sig.clone());
     lluma_crypto::account::bootstrap_verify(registry_pk, &sb.doc, &sig)
         .map_err(|_| ClientError::Crypto)?;
-    postcard::from_bytes(&sb.doc).map_err(|_| ClientError::Protocol)
+    let doc: BootstrapDoc = postcard::from_bytes(&sb.doc).map_err(|_| ClientError::Protocol)?;
+    // Fail-closed content validation (defense in depth; the signature already
+    // authenticates these, but reject shapes we will not consume).
+    if doc.version != 1 || doc.gateway_kc.is_empty() || !doc.relay_url.starts_with("https://") {
+        return Err(ClientError::Protocol);
+    }
+    Ok(doc)
 }
 
 /// Fetch + verify the signed bootstrap from a relay over plain HTTPS (this runs
@@ -125,6 +131,10 @@ pub struct Client {
     /// broker to resolve + bind the spend to). In the full model this comes from
     /// the signed snapshot entry alongside `host_pk` (its HPKE key).
     host_account: [u8; 32],
+    /// Pinned issuer `key_id` from the verified bootstrap. When set, `key_config`
+    /// requires the served `key_id` to match — otherwise a misbehaving
+    /// gateway/broker could serve a per-client issuer key to tag/link tokens.
+    expected_issuer_key_id: Option<[u8; 32]>,
 }
 
 impl Client {
@@ -142,10 +152,20 @@ impl Client {
             pk,
             host_pk,
             host_account,
+            expected_issuer_key_id: None,
         }
     }
 
-    /// Fetch and pin the issuer key-config (`key_id == BLAKE3(pubkey)`).
+    /// Pin the expected issuer `key_id` (from the verified bootstrap doc). Any
+    /// served key-config with a different `key_id` is rejected.
+    pub fn with_expected_issuer_key_id(mut self, key_id: [u8; 32]) -> Self {
+        self.expected_issuer_key_id = Some(key_id);
+        self
+    }
+
+    /// Fetch and pin the issuer key-config (`key_id == BLAKE3(pubkey)`), and —
+    /// if an expected `key_id` was pinned from the bootstrap — require it to
+    /// match exactly.
     pub async fn key_config(&self) -> Result<KeyConfigResponse, ClientError> {
         let resp = self
             .agent
@@ -163,6 +183,11 @@ impl Client {
             serde_json::from_slice(&resp.body).map_err(|_| ClientError::Protocol)?;
         if *blake3::hash(&kc.issuer_public_key.0).as_bytes() != kc.key_id {
             return Err(ClientError::Protocol);
+        }
+        if let Some(expected) = self.expected_issuer_key_id {
+            if kc.key_id != expected {
+                return Err(ClientError::Protocol);
+            }
         }
         Ok(kc)
     }

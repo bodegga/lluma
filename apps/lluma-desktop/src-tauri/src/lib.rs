@@ -15,11 +15,9 @@ use tauri::Manager;
 use tokio::sync::Mutex;
 
 use account::Account;
-use client::TokenStore;
+use client::{TokenStore, VerifiedNet};
 use host::HostHandle;
-use types::{
-    AccountStatus, BootstrapDoc, ChatReply, HostStatus, NetworkStatus, NewAccount, Settings,
-};
+use types::{AccountStatus, ChatReply, HostStatus, NetworkStatus, NewAccount, Settings};
 
 /// Everything mutable behind one async mutex. The lock is short-lived except
 /// across network calls in chat/acquire/host-start, which serialize by design
@@ -33,6 +31,11 @@ struct Inner {
     /// Passphrase kept in memory while unlocked, to re-seal the token store on
     /// balance changes. Cleared on `lock`.
     passphrase: Option<String>,
+    /// Trusted network params for THIS session. Set ONLY by a verified path:
+    /// `auto_connect` (signed bootstrap vs the pinned anchor) on anchored builds,
+    /// or manual entry on self-host/dev builds. Chat/acquire refuse when `None`.
+    /// Persisted `settings.*_b64` are display-only and never trusted for verification.
+    verified: Option<VerifiedNet>,
     host: Option<HostHandle>,
 }
 
@@ -44,6 +47,14 @@ struct AppState {
 impl AppState {
     fn new(data_dir: PathBuf) -> Self {
         let settings = Settings::load(&data_dir);
+        // Anchored builds must (re)establish trust via auto_connect each launch;
+        // self-host/dev builds may restore the operator's manually-entered
+        // endpoints (an explicit user-trust choice), never unverified relay data.
+        let verified = if anchor::has_anchor() {
+            None
+        } else {
+            client::manual_verified(&settings).ok()
+        };
         AppState {
             data_dir,
             inner: Mutex::new(Inner {
@@ -51,6 +62,7 @@ impl AppState {
                 account: None,
                 tokens: TokenStore::default(),
                 passphrase: None,
+                verified,
                 host: None,
             }),
         }
@@ -70,38 +82,15 @@ async fn set_settings(
     settings: Settings,
 ) -> Result<(), String> {
     settings.save(&state.data_dir)?;
-    state.inner.lock().await.settings = settings;
-    Ok(())
-}
-
-/// Pull endpoint material from the relay's signed bootstrap, if published.
-#[tauri::command]
-async fn fetch_bootstrap(state: tauri::State<'_, AppState>) -> Result<Settings, String> {
-    let relay = state.inner.lock().await.settings.relay_url.clone();
-    let url = format!("{}/v1/bootstrap", relay.trim_end_matches('/'));
-    let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(10))
-        .build()
-        .map_err(|e| e.to_string())?;
-    let resp = http.get(&url).send().await.map_err(|e| e.to_string())?;
-    if !resp.status().is_success() {
-        return Err("relay does not publish bootstrap yet — paste values manually".into());
-    }
-    let doc: BootstrapDoc = resp.json().await.map_err(|_| {
-        "relay does not publish bootstrap yet — paste values manually".to_string()
-    })?;
     let mut inner = state.inner.lock().await;
-    if !doc.gateway_kc_b64.is_empty() {
-        inner.settings.gateway_kc_b64 = doc.gateway_kc_b64;
+    inner.settings = settings;
+    // On anchored (official) builds, trust comes ONLY from the pinned-key-verified
+    // bootstrap — webview-supplied endpoint fields are never promoted to trust.
+    // On self-host/dev builds, manual entry IS the (explicit) trust path.
+    if !anchor::has_anchor() {
+        inner.verified = client::manual_verified(&inner.settings).ok();
     }
-    if !doc.registry_pk_b64.is_empty() {
-        inner.settings.registry_pk_b64 = doc.registry_pk_b64;
-    }
-    if !doc.issuer_key_id_hex.is_empty() {
-        inner.settings.issuer_key_id_hex = doc.issuer_key_id_hex;
-    }
-    inner.settings.save(&state.data_dir)?;
-    Ok(inner.settings.clone())
+    Ok(())
 }
 
 // ---- account ----
@@ -204,14 +193,23 @@ fn has_anchor() -> bool {
 #[tauri::command]
 async fn auto_connect(state: tauri::State<'_, AppState>) -> Result<NetworkStatus, String> {
     let Some(anchor_pk) = anchor::pinned_registry_pk() else {
+        // Unanchored (self-host/dev) build: no signed bootstrap to fetch; trust
+        // comes from manual entry. Just report current reachability.
         return network_status(state).await;
     };
     let relay = state.inner.lock().await.settings.relay_url.clone();
+    // Verified against the COMPILED-IN key — a malicious relay cannot subvert this.
     let doc = lluma_client::fetch_bootstrap(&relay, &anchor_pk)
         .await
-        .map_err(|e| format!("auto-connect failed ({e}) — check your connection or set endpoints manually"))?;
+        .map_err(|e| format!("auto-connect failed ({e}) — check your connection and try again"))?;
     {
         let mut inner = state.inner.lock().await;
+        inner.verified = Some(VerifiedNet {
+            gateway_kc: lluma_core::wire::OhttpKeyConfig(doc.gateway_kc.clone()),
+            registry_pk: anchor_pk.clone(),
+            issuer_key_id: Some(doc.issuer_key_id),
+        });
+        // Cache for display only (never trusted for verification).
         inner.settings.gateway_kc_b64 =
             base64::engine::general_purpose::STANDARD.encode(&doc.gateway_kc);
         inner.settings.registry_pk_b64 =
@@ -225,47 +223,39 @@ async fn auto_connect(state: tauri::State<'_, AppState>) -> Result<NetworkStatus
 
 #[tauri::command]
 async fn network_status(state: tauri::State<'_, AppState>) -> Result<NetworkStatus, String> {
-    // Build a probe client. If no account is unlocked, use an ephemeral one —
-    // key-config needs no account, only the gateway key-config to seal OHTTP.
-    let (settings, acct_keys) = {
+    // Probing needs the session's verified gateway key-config. If trust has not
+    // been established this session, report "not connected" rather than trusting
+    // any persisted/unverified value.
+    let (relay, verified, acct_keys) = {
         let inner = state.inner.lock().await;
-        let keys = inner
-            .account
-            .as_ref()
-            .map(|a| (a.sk.clone(), a.pk.clone()));
-        (inner.settings.clone(), keys)
+        (
+            inner.settings.relay_url.clone(),
+            inner.verified.clone(),
+            inner.account.as_ref().map(|a| (a.sk.clone(), a.pk.clone())),
+        )
     };
-    let client = match acct_keys {
-        Some((sk, pk)) => {
-            let (kc, _reg) = client::decode_settings(&settings)?;
-            lluma_client::Client::new(
-                settings.relay_url.clone(),
-                kc,
-                sk,
-                pk,
-                lluma_core::wire::HostPublicKey(vec![0u8; 32]),
-                [0u8; 32],
-            )
-        }
+    let Some(v) = verified else {
+        return Ok(NetworkStatus {
+            reachable: false,
+            epoch: 0,
+            denomination: 0,
+            latency_ms: 0,
+            message: "not connected".into(),
+        });
+    };
+    // Ephemeral throwaway account when none is unlocked — key-config needs no
+    // real account, only the gateway key-config to seal OHTTP.
+    let (sk, pk) = match acct_keys {
+        Some(keys) => keys,
         None => {
-            // Ephemeral throwaway account just to probe key-config.
-            let (kc, _reg) = client::decode_settings(&settings)?;
             let mut rng = rand_core::OsRng;
             let m = lluma_crypto::account::account_mnemonic_new(&mut rng)
                 .map_err(|e| e.to_string())?;
-            let (sk, pk) =
-                lluma_crypto::account::derive_keypair_from_seed(&m).map_err(|e| e.to_string())?;
-            lluma_client::Client::new(
-                settings.relay_url.clone(),
-                kc,
-                sk,
-                pk,
-                lluma_core::wire::HostPublicKey(vec![0u8; 32]),
-                [0u8; 32],
-            )
+            lluma_crypto::account::derive_keypair_from_seed(&m).map_err(|e| e.to_string())?
         }
     };
-    Ok(client::network_status(&client).await)
+    let cli = client::build_client(&relay, &sk, &pk, &v);
+    Ok(client::network_status(&cli).await)
 }
 
 #[tauri::command]
@@ -274,10 +264,11 @@ async fn acquire_tokens(
     n: usize,
 ) -> Result<usize, String> {
     let mut inner = state.inner.lock().await;
-    let Inner { settings, account, tokens, passphrase, .. } = &mut *inner;
+    let Inner { settings, account, tokens, passphrase, verified, .. } = &mut *inner;
     let acct = account.as_ref().ok_or("unlock your account first")?;
     let pass = passphrase.as_ref().ok_or("unlock your account first")?;
-    let cli = client::build_client(settings, acct)?;
+    let v = verified.as_ref().ok_or("not connected — connect to the network first")?;
+    let cli = client::build_client(&settings.relay_url, &acct.sk, &acct.pk, v);
     client::acquire(&cli, tokens, &state.data_dir, pass, n).await
 }
 
@@ -287,11 +278,12 @@ async fn send_message(
     prompt: String,
 ) -> Result<ChatReply, String> {
     let mut inner = state.inner.lock().await;
-    let Inner { settings, account, tokens, passphrase, .. } = &mut *inner;
+    let Inner { settings, account, tokens, passphrase, verified, .. } = &mut *inner;
     let acct = account.as_ref().ok_or("unlock your account first")?;
     let pass = passphrase.as_ref().ok_or("unlock your account first")?;
-    let (_kc, registry_pk) = client::decode_settings(settings)?;
-    let cli = client::build_client(settings, acct)?;
+    let v = verified.as_ref().ok_or("not connected — connect to the network first")?;
+    let registry_pk = v.registry_pk.clone();
+    let cli = client::build_client(&settings.relay_url, &acct.sk, &acct.pk, v);
     client::send_message(&cli, tokens, &registry_pk, &state.data_dir, pass, &prompt).await
 }
 
@@ -345,7 +337,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_settings,
             set_settings,
-            fetch_bootstrap,
             has_anchor,
             auto_connect,
             account_status,

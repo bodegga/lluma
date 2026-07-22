@@ -89,7 +89,9 @@ pub fn ohttp_keygen(
 /// signed bootstrap stays valid across restarts. Deterministic.
 pub fn ohttp_public_from_secret(sk: &GatewaySecretKey) -> Result<OhttpKeyConfig> {
     let bytes = sk.as_ref();
-    if bytes.len() < 1 + IKM_LEN {
+    // Exact length: a persisted gateway secret is precisely `key_id || ikm`.
+    // Reject anything else rather than silently ignoring trailing bytes.
+    if bytes.len() != 1 + IKM_LEN {
         return Err(CryptoError::Truncated);
     }
     let key_id = bytes[0];

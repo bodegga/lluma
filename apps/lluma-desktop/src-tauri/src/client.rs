@@ -5,9 +5,10 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 use lluma_client::Client;
-use lluma_core::wire::{AccountPublicKey, HostPublicKey, KeystoreBlob, OhttpKeyConfig, Token};
+use lluma_core::wire::{
+    AccountPublicKey, AccountSecretKey, HostPublicKey, KeystoreBlob, OhttpKeyConfig, Token,
+};
 
-use crate::account::Account;
 use crate::types::{ChatReply, NetworkStatus, Settings};
 
 fn b64d(s: &str, what: &str) -> Result<Vec<u8>, String> {
@@ -21,27 +22,46 @@ fn b64d(s: &str, what: &str) -> Result<Vec<u8>, String> {
         .map_err(|_| format!("{what} is not valid base64"))
 }
 
-/// Decode the base64 endpoint material from settings into the gateway OHTTP
-/// key-config and the broker registry public key.
-pub fn decode_settings(s: &Settings) -> Result<(OhttpKeyConfig, AccountPublicKey), String> {
-    let kc = OhttpKeyConfig(b64d(&s.gateway_kc_b64, "gateway key-config")?);
-    let registry = AccountPublicKey(b64d(&s.registry_pk_b64, "registry pubkey")?);
-    Ok((kc, registry))
+/// The trusted network parameters for a session. Established ONLY by a verified
+/// path: a signed bootstrap checked against the pinned registry key (anchored
+/// builds), or explicit manual entry (self-host/dev builds). Never sourced from
+/// unverified relay data. Held in memory — persisted settings are display-only.
+#[derive(Clone, Debug)]
+pub struct VerifiedNet {
+    pub gateway_kc: OhttpKeyConfig,
+    pub registry_pk: AccountPublicKey,
+    /// Pinned issuer key-id, when known (from the signed bootstrap).
+    pub issuer_key_id: Option<[u8; 32]>,
 }
 
-/// Build a `Client` from settings + an unlocked account. Host params are
-/// per-message (snapshot-selected), so placeholders are passed to the
-/// constructor.
-pub fn build_client(s: &Settings, acct: &Account) -> Result<Client, String> {
-    let (kc, _registry) = decode_settings(s)?;
-    Ok(Client::new(
-        s.relay_url.clone(),
-        kc,
-        acct.sk.clone(),
-        acct.pk.clone(),
+/// Decode manually-entered endpoint material (self-host/dev only) into a
+/// `VerifiedNet`. This is an explicit user-trust path — there is no signature.
+pub fn manual_verified(s: &Settings) -> Result<VerifiedNet, String> {
+    let gateway_kc = OhttpKeyConfig(b64d(&s.gateway_kc_b64, "gateway key-config")?);
+    let registry_pk = AccountPublicKey(b64d(&s.registry_pk_b64, "registry pubkey")?);
+    Ok(VerifiedNet { gateway_kc, registry_pk, issuer_key_id: None })
+}
+
+/// Build a `Client` from the relay URL + account keys + the session's verified
+/// network params. Host params are per-message (snapshot-selected).
+pub fn build_client(
+    relay_url: &str,
+    sk: &AccountSecretKey,
+    pk: &AccountPublicKey,
+    v: &VerifiedNet,
+) -> Client {
+    let mut c = Client::new(
+        relay_url.to_string(),
+        v.gateway_kc.clone(),
+        sk.clone(),
+        pk.clone(),
         HostPublicKey(vec![0u8; 32]),
         [0u8; 32],
-    ))
+    );
+    if let Some(kid) = v.issuer_key_id {
+        c = c.with_expected_issuer_key_id(kid);
+    }
+    c
 }
 
 /// Unspent blind tokens (bearer credits), encrypted at rest under the account
@@ -177,9 +197,9 @@ mod tests {
     }
 
     #[test]
-    fn decode_settings_reports_missing_material() {
+    fn manual_verified_reports_missing_material() {
         let s = Settings::default(); // gateway/registry empty
-        let err = decode_settings(&s).unwrap_err();
+        let err = manual_verified(&s).unwrap_err();
         assert!(err.contains("gateway key-config"));
     }
 
