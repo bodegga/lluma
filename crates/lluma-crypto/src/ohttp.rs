@@ -83,6 +83,26 @@ pub fn ohttp_keygen(
     Ok((GatewaySecretKey(secret), OhttpKeyConfig(public)))
 }
 
+/// Re-derive the client-facing public key-config from a persisted
+/// `GatewaySecretKey` (`key_id || ikm`). Lets the gateway load a stored key on
+/// startup and reproduce the exact `OhttpKeyConfig` clients seal to, so the
+/// signed bootstrap stays valid across restarts. Deterministic.
+pub fn ohttp_public_from_secret(sk: &GatewaySecretKey) -> Result<OhttpKeyConfig> {
+    let bytes = sk.as_ref();
+    if bytes.len() < 1 + IKM_LEN {
+        return Err(CryptoError::Truncated);
+    }
+    let key_id = bytes[0];
+    let ikm = &bytes[1..1 + IKM_LEN];
+    let suite = SymmetricSuite::new(OKdf::HkdfSha256, OAead::ChaCha20Poly1305);
+    let cfg = KeyConfig::derive(key_id, OKem::X25519Sha256, vec![suite], ikm)
+        .map_err(|e| CryptoError::Ohttp(e.to_string()))?;
+    let public = cfg
+        .encode()
+        .map_err(|e| CryptoError::Ohttp(e.to_string()))?;
+    Ok(OhttpKeyConfig(public))
+}
+
 /// Encapsulate a request to the gateway's public key config. Returns the binary
 /// capsule (ready to POST to the relay) and a `ClientResponseContext` for
 /// opening the eventual sealed response.
@@ -188,6 +208,19 @@ mod tests {
             ohttp_encapsulate(&mut rng, &cfg, b"inner ciphertext bytes").unwrap();
         let (inner, _sctx) = ohttp_decapsulate(&sk, &capsule).unwrap();
         assert_eq!(inner, b"inner ciphertext bytes");
+    }
+
+    #[test]
+    fn public_from_secret_matches_keygen_and_decapsulates() {
+        let mut rng = OsRng;
+        let (sk, cfg) = ohttp_keygen(&mut rng, 7).unwrap();
+        // Re-deriving the public config from the persisted secret is identical.
+        let cfg2 = ohttp_public_from_secret(&sk).unwrap();
+        assert_eq!(cfg.0, cfg2.0, "persisted secret reproduces the exact key-config");
+        // And a capsule sealed to the re-derived config still decapsulates.
+        let (capsule, _c) = ohttp_encapsulate(&mut rng, &cfg2, b"hi").unwrap();
+        let (inner, _s) = ohttp_decapsulate(&sk, &capsule).unwrap();
+        assert_eq!(inner, b"hi");
     }
 
     #[test]

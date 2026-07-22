@@ -9,7 +9,12 @@ name = "lluma-keygen"
 path = "src/main.rs"
 
 [dependencies]
+lluma-core = { path = "../lluma-core" }
 lluma-crypto = { path = "../lluma-crypto" }
 blind-rsa-signatures = { workspace = true }
 blake3 = { workspace = true }
+serde_json = { workspace = true }
+postcard = { workspace = true }
+base64 = "0.22"
+rand_core = { workspace = true }
 getrandom = "0.2"

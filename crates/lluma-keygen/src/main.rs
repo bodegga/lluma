@@ -34,14 +34,39 @@ fn main() -> Result<(), String> {
     }
     write(dir, "epoch_salt.bin", &epoch_salt)?;
 
+    // Persistent gateway OHTTP key (`key_id || ikm`). Enables a stable published
+    // key-config across gateway restarts, which the signed bootstrap depends on.
+    let mut rng = rand_core::OsRng;
+    let (gw_sk, gw_kc) = lluma_crypto::ohttp::ohttp_keygen(&mut rng, 1)
+        .map_err(|e| format!("gateway keygen: {e}"))?;
+    write(dir, "gateway_kc.sk", &gw_sk.0)?;
+    let registry_pk = lluma_crypto::account::account_public_from_secret(
+        &lluma_core::wire::AccountSecretKey(registry_sk.to_vec()),
+    )
+    .map_err(|e| format!("registry pubkey: {e}"))?;
+
     println!("wrote key material to {}", dir.display());
     println!("  issuer_sk.der  (RSA-BSSA secret, DER)  -> LLUMA_ISSUER_SK_DER_FILE");
     println!("  issuer_pk.der  (RSA-BSSA public, DER)  -> LLUMA_ISSUER_PK_DER_FILE");
     println!("  registry.sk    (32 B Ed25519 secret)   -> LLUMA_REGISTRY_SK_FILE");
     println!("  epoch_salt.bin (32 B, non-zero)        -> LLUMA_EPOCH_SALT_FILE");
+    println!("  gateway_kc.sk  (OHTTP secret)          -> LLUMA_GATEWAY_KC_SK_FILE");
     println!("issuer key_id (BLAKE3 of pubkey): {}", hex(key_id.as_bytes()));
+    println!(
+        "registry pubkey (pin in the app as LLUMA_REGISTRY_PK_B64): {}",
+        b64(&registry_pk.0)
+    );
+    println!(
+        "gateway key_config (base64, for reference): {}",
+        b64(&gw_kc.0)
+    );
     println!("SECRETS — keep offline, chmod 600 on the host, never commit.");
     Ok(())
+}
+
+fn b64(b: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(b)
 }
 
 fn write(dir: &Path, name: &str, bytes: &[u8]) -> Result<(), String> {

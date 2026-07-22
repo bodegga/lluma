@@ -47,6 +47,14 @@ pub fn account_fingerprint(pk: &AccountPublicKey) -> AccountId {
     AccountId(*blake3::hash(&pk.0).as_bytes())
 }
 
+/// Derive the Ed25519 public key from a raw 32-byte account/registry secret.
+/// Used by operator tooling to print the registry pubkey (to pin in the app)
+/// and to bind a signed bootstrap to its verifier.
+pub fn account_public_from_secret(sk: &AccountSecretKey) -> Result<AccountPublicKey> {
+    let signing = signing_key(sk)?;
+    Ok(AccountPublicKey(signing.verifying_key().to_bytes().to_vec()))
+}
+
 /// Domain-separated canonical bytes signed for a usage receipt:
 /// `b"lluma-usage-receipt-v1" ‖ postcard(body)`.
 fn canonical(body: &UsageReceiptBody) -> Result<Vec<u8>> {
