@@ -83,11 +83,19 @@ async fn set_settings(
 ) -> Result<(), String> {
     settings.save(&state.data_dir)?;
     let mut inner = state.inner.lock().await;
+    let relay_changed = inner.settings.relay_url != settings.relay_url;
     inner.settings = settings;
     // On anchored (official) builds, trust comes ONLY from the pinned-key-verified
     // bootstrap — webview-supplied endpoint fields are never promoted to trust.
+    // Changing the relay invalidates the current verified params (they were
+    // bootstrapped from a different relay) → clear so the next auto_connect
+    // re-verifies against the new relay.
     // On self-host/dev builds, manual entry IS the (explicit) trust path.
-    if !anchor::has_anchor() {
+    if anchor::has_anchor() {
+        if relay_changed {
+            inner.verified = None;
+        }
+    } else {
         inner.verified = client::manual_verified(&inner.settings).ok();
     }
     Ok(())

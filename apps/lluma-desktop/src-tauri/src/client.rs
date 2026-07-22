@@ -14,7 +14,7 @@ use crate::types::{ChatReply, NetworkStatus, Settings};
 fn b64d(s: &str, what: &str) -> Result<Vec<u8>, String> {
     if s.trim().is_empty() {
         return Err(format!(
-            "{what} is not set — fill it in Settings or use Fetch from relay"
+            "{what} is not set — enter it under Advanced (get it from your operator)"
         ));
     }
     base64::engine::general_purpose::STANDARD
