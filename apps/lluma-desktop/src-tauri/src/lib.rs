@@ -2,6 +2,7 @@
 //! account, client (chat), settings, and host (contribute) modules to the UI.
 
 mod account;
+mod anchor;
 mod client;
 mod host;
 mod settings;
@@ -9,6 +10,7 @@ mod types;
 
 use std::path::{Path, PathBuf};
 
+use base64::Engine;
 use tauri::Manager;
 use tokio::sync::Mutex;
 
@@ -186,6 +188,41 @@ async fn lock(state: tauri::State<'_, AppState>) -> Result<(), String> {
 
 // ---- network / chat ----
 
+/// Whether this build has a pinned trust anchor (i.e. secure auto-connect is
+/// available). The frontend uses this to choose the automatic vs manual flow.
+#[tauri::command]
+fn has_anchor() -> bool {
+    anchor::has_anchor()
+}
+
+/// Secure auto-connect: if an anchor is pinned, fetch + verify the signed
+/// bootstrap from the relay, populate the endpoints (gateway key-config +
+/// the pinned registry key + issuer key-id), persist, and report reachability.
+/// If no anchor is pinned, this is a no-op that returns the current status —
+/// the manual (Advanced) flow applies. A malicious relay cannot subvert this:
+/// the bootstrap is signature-verified against the compiled-in key.
+#[tauri::command]
+async fn auto_connect(state: tauri::State<'_, AppState>) -> Result<NetworkStatus, String> {
+    let Some(anchor_pk) = anchor::pinned_registry_pk() else {
+        return network_status(state).await;
+    };
+    let relay = state.inner.lock().await.settings.relay_url.clone();
+    let doc = lluma_client::fetch_bootstrap(&relay, &anchor_pk)
+        .await
+        .map_err(|e| format!("auto-connect failed ({e}) — check your connection or set endpoints manually"))?;
+    {
+        let mut inner = state.inner.lock().await;
+        inner.settings.gateway_kc_b64 =
+            base64::engine::general_purpose::STANDARD.encode(&doc.gateway_kc);
+        inner.settings.registry_pk_b64 =
+            base64::engine::general_purpose::STANDARD.encode(&anchor_pk.0);
+        inner.settings.issuer_key_id_hex =
+            doc.issuer_key_id.iter().map(|b| format!("{b:02x}")).collect();
+        inner.settings.save(&state.data_dir)?;
+    }
+    network_status(state).await
+}
+
 #[tauri::command]
 async fn network_status(state: tauri::State<'_, AppState>) -> Result<NetworkStatus, String> {
     // Build a probe client. If no account is unlocked, use an ephemeral one —
@@ -309,6 +346,8 @@ pub fn run() {
             get_settings,
             set_settings,
             fetch_bootstrap,
+            has_anchor,
+            auto_connect,
             account_status,
             create_account,
             import_account,

@@ -42,6 +42,8 @@ document.querySelectorAll("[data-goto]").forEach((b) =>
 
 // ---- shared account/balance state ----
 let acct = { has_account: false, unlocked: false, account_id_hex: "", balance: 0 };
+// Whether this build has a pinned trust anchor (secure auto-connect available).
+let anchored = false;
 
 function renderAccount() {
   $("rail-bal-val").textContent = acct.unlocked ? acct.balance : "—";
@@ -103,13 +105,23 @@ function dot(el, state) { // state: ok | warn | bad
 // needed to connect are missing, reveal the Advanced section so the next step
 // is visible — but never silently trust the relay for them.
 function updateConn(reachable, message) {
+  // Anchored builds self-configure — never nag the user to paste endpoints.
+  if (anchored) {
+    dot($("conn-dot"), reachable ? "ok" : "bad");
+    $("conn-text").textContent = reachable ? "connected" : "connecting…";
+    $("conn-hint").textContent = reachable
+      ? "Connected automatically — verified against this build's pinned key."
+      : (message || "Couldn't reach the network. Retrying on next launch; you can also Connect.");
+    show($("advanced-endpoints"), false); // manual entry is for self-host/dev builds only
+    return;
+  }
   const needsEndpoints = !$("set-gwkc").value.trim() || !$("set-regpk").value.trim();
   dot($("conn-dot"), reachable ? "ok" : (needsEndpoints ? "warn" : "bad"));
   $("conn-text").textContent = reachable ? "connected" : (needsEndpoints ? "not configured" : "offline");
   $("conn-hint").textContent = reachable
     ? "Connected to the network."
     : (needsEndpoints
-        ? "This relay needs a gateway key-config + registry pubkey to connect. Add them under Advanced."
+        ? "This is a self-host/dev build with no pinned key. Enter endpoints under Advanced to connect."
         : (message || "Relay unreachable."));
   if (!reachable && needsEndpoints) $("advanced-endpoints").open = true;
 }
@@ -139,12 +151,17 @@ async function refreshStatus() {
 
 $("refresh-status").addEventListener("click", refreshStatus);
 
-// Explicit connect: save the current relay + endpoints, then probe.
+// Explicit connect: anchored builds re-run verified auto-connect; self-host
+// builds save the manually-entered endpoints, then probe.
 $("connect-btn").addEventListener("click", async () => {
   $("settings-msg").textContent = "Connecting…";
   try {
-    const base = await call("get_settings");
-    await call("set_settings", { settings: currentSettingsFromForm(base) });
+    if (anchored) {
+      await call("auto_connect");
+    } else {
+      const base = await call("get_settings");
+      await call("set_settings", { settings: currentSettingsFromForm(base) });
+    }
     await refreshStatus();
     $("settings-msg").textContent = "";
   } catch (e) { $("settings-msg").textContent = String(e); }
@@ -365,8 +382,14 @@ $("host-stop").addEventListener("click", async () => {
 // ---- boot ----
 (async function boot() {
   if (!invoke) { toast("Tauri bridge unavailable — run inside the app", "error"); return; }
+  try { anchored = await call("has_anchor"); } catch (e) { anchored = false; }
   await loadSettings();
   await refreshAccount();
+  // Anchored builds self-configure on launch: fetch + verify the signed
+  // bootstrap and populate endpoints before probing the network.
+  if (anchored) {
+    try { await call("auto_connect"); await loadSettings(); } catch (e) { /* surfaced by status */ }
+  }
   await refreshStatus();
   // First run with no account: land on Settings so creating one is the obvious step.
   if (!acct.has_account) gotoAccountStep();
