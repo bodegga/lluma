@@ -26,6 +26,7 @@ const ISSUE_REQUEST_DOMAIN: &[u8] = b"lluma-issue-request-v1";
 const HOST_REGISTER_DOMAIN: &[u8] = b"lluma-host-register-v1";
 const HEARTBEAT_DOMAIN: &[u8] = b"lluma-heartbeat-v1";
 const SNAPSHOT_DOMAIN: &[u8] = b"lluma-registry-snapshot-v1";
+const BOOTSTRAP_DOMAIN: &[u8] = b"lluma-bootstrap-v1";
 
 // Keystore blob layout:
 //   magic(4) ‖ version(1) ‖ argon2 m_cost(4 LE) ‖ t_cost(4 LE) ‖ p(4 LE)
@@ -222,6 +223,43 @@ fn snapshot_canonical(snapshot_bytes: &[u8]) -> Vec<u8> {
     let mut out = SNAPSHOT_DOMAIN.to_vec();
     out.extend_from_slice(snapshot_bytes);
     out
+}
+
+/// Domain-separated canonical bytes signed for a client bootstrap document:
+/// `b"lluma-bootstrap-v1" ‖ doc_bytes`, where `doc_bytes` is the exact
+/// postcard-encoded `BootstrapDoc`. Distinct domain keeps it non-interchangeable
+/// with the snapshot/receipt domains even though both use the registry key.
+fn bootstrap_canonical(doc_bytes: &[u8]) -> Vec<u8> {
+    let mut out = BOOTSTRAP_DOMAIN.to_vec();
+    out.extend_from_slice(doc_bytes);
+    out
+}
+
+/// Sign a bootstrap document (exact postcard bytes) with the registry Ed25519
+/// secret key. Deterministic — no RNG (matches `snapshot_sign`).
+pub fn bootstrap_sign(sk: &AccountSecretKey, doc_bytes: &[u8]) -> Result<ReceiptSignature> {
+    let key = signing_key(sk)?;
+    let msg = bootstrap_canonical(doc_bytes);
+    Ok(ReceiptSignature(key.sign(&msg).to_bytes().to_vec()))
+}
+
+/// Verify a bootstrap-document signature against the pinned registry public key.
+/// Any mismatch returns `BadSignature`.
+pub fn bootstrap_verify(
+    pk: &AccountPublicKey,
+    doc_bytes: &[u8],
+    sig: &ReceiptSignature,
+) -> Result<()> {
+    let key = verifying_key(pk)?;
+    let msg = bootstrap_canonical(doc_bytes);
+    let sig_bytes: [u8; 64] = sig
+        .0
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::BadSignature)?;
+    let signature = Signature::from_bytes(&sig_bytes);
+    key.verify(&msg, &signature)
+        .map_err(|_| CryptoError::BadSignature)
 }
 
 /// Sign raw registry-snapshot bytes with the broker's Ed25519 account secret
@@ -488,6 +526,34 @@ pub fn open_keystore(passphrase: &str, blob: &KeystoreBlob) -> Result<Mnemonic> 
 mod tests {
     use super::*;
     use lluma_core::ModelId;
+
+    #[test]
+    fn bootstrap_sign_verify_round_trip_and_rejects() {
+        let (sk, pk) = derive_keypair_from_seed(&Mnemonic([21u8; 16])).unwrap();
+        let doc = b"postcard-encoded bootstrap doc bytes";
+        let sig = bootstrap_sign(&sk, doc).unwrap();
+        assert!(bootstrap_verify(&pk, doc, &sig).is_ok());
+        // wrong key
+        let (_sk2, pk2) = derive_keypair_from_seed(&Mnemonic([22u8; 16])).unwrap();
+        assert!(bootstrap_verify(&pk2, doc, &sig).is_err());
+        // tampered doc
+        let mut bad = doc.to_vec();
+        bad[0] ^= 0xff;
+        assert!(bootstrap_verify(&pk, &bad, &sig).is_err());
+    }
+
+    #[test]
+    fn bootstrap_and_snapshot_signatures_are_not_interchangeable() {
+        // Same registry key, same bytes, different domain ⇒ signatures must not
+        // cross-verify (domain separation).
+        let (sk, pk) = derive_keypair_from_seed(&Mnemonic([23u8; 16])).unwrap();
+        let bytes = b"identical bytes under two domains";
+        let boot_sig = bootstrap_sign(&sk, bytes).unwrap();
+        let snap_sig = snapshot_sign(&sk, bytes).unwrap();
+        assert_ne!(boot_sig.0, snap_sig.0, "domains must yield different signatures");
+        assert!(bootstrap_verify(&pk, bytes, &snap_sig).is_err());
+        assert!(snapshot_verify(&pk, bytes, &boot_sig).is_err());
+    }
 
     #[test]
     fn seal_bytes_round_trips_and_rejects_wrong_pass() {

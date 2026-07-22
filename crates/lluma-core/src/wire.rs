@@ -193,6 +193,24 @@ pub struct SnapshotBody {
     pub hosts: Vec<SnapshotHostEntry>,
 }
 
+/// Client bootstrap document — the network coordinates an app needs to connect,
+/// published (signed) so a fresh install can self-configure. Signed by the
+/// registry key with domain `lluma-bootstrap-v1`; the app verifies against its
+/// pinned registry public key. Carries only NON-pinned material: the registry
+/// pubkey itself is compiled into the app, so it is not repeated here.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BootstrapDoc {
+    pub version: u8,
+    /// Canonical relay URL (hook for future nearest-relay selection).
+    pub relay_url: String,
+    /// Gateway OHTTP key-config bytes (what the client seals OHTTP to).
+    pub gateway_kc: Vec<u8>,
+    /// Pinned issuer key-id (`BLAKE3(issuer_pubkey)`) the client cross-checks.
+    pub issuer_key_id: [u8; 32],
+    /// Unix seconds the doc was signed (freshness/debugging; not an expiry).
+    pub issued_at_s: u64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

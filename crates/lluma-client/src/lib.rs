@@ -11,13 +11,52 @@
 use blind_rsa_signatures::reexports::rand::Rng;
 
 use lluma_core::proto::v1::{
-    ExecRequest, ExecResponse, IssueRequest, IssueResponse, KeyConfigResponse, SnapshotResponse,
+    ExecRequest, ExecResponse, IssueRequest, IssueResponse, KeyConfigResponse, SignedBootstrap,
+    SnapshotResponse,
 };
 use lluma_core::wire::{
-    AccountPublicKey, AccountSecretKey, HostPublicKey, IssueRequestBody, OhttpKeyConfig,
-    ReceiptSignature, SnapshotBody, SnapshotHostEntry, Token,
+    AccountPublicKey, AccountSecretKey, BootstrapDoc, HostPublicKey, IssueRequestBody,
+    OhttpKeyConfig, ReceiptSignature, SnapshotBody, SnapshotHostEntry, Token,
 };
 use lluma_net::{InnerRequest, OhttpAgent};
+
+/// Verify a signed bootstrap against the pinned registry public key and decode
+/// it. Pure + fail-closed — reused by [`fetch_bootstrap`] and unit-testable
+/// without a network. A malicious relay cannot forge this: the signature is
+/// checked against the app's compiled-in registry key before any field is read.
+pub fn verify_bootstrap(
+    registry_pk: &AccountPublicKey,
+    sb: &SignedBootstrap,
+) -> Result<BootstrapDoc, ClientError> {
+    let sig = ReceiptSignature(sb.sig.clone());
+    lluma_crypto::account::bootstrap_verify(registry_pk, &sb.doc, &sig)
+        .map_err(|_| ClientError::Crypto)?;
+    postcard::from_bytes(&sb.doc).map_err(|_| ClientError::Protocol)
+}
+
+/// Fetch + verify the signed bootstrap from a relay over plain HTTPS (this runs
+/// BEFORE OHTTP is configured — it is safe precisely because the payload is
+/// signature-verified against the pinned registry key). Returns the verified
+/// network coordinates the app self-configures from.
+pub async fn fetch_bootstrap(
+    relay_url: &str,
+    registry_pk: &AccountPublicKey,
+) -> Result<BootstrapDoc, ClientError> {
+    let url = format!("{}/v1/bootstrap", relay_url.trim_end_matches('/'));
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|_| ClientError::Transport)?;
+    let resp = http.get(&url).send().await.map_err(|_| ClientError::Transport)?;
+    let status = resp.status().as_u16();
+    if status != 200 {
+        return Err(ClientError::Server(status));
+    }
+    let bytes = resp.bytes().await.map_err(|_| ClientError::Transport)?;
+    let sb: SignedBootstrap =
+        serde_json::from_slice(&bytes).map_err(|_| ClientError::Protocol)?;
+    verify_bootstrap(registry_pk, &sb)
+}
 
 /// Fixed snapshot bucket size (64 KiB) and length-prefix width — must match the
 /// broker's `snapshot` module exactly.

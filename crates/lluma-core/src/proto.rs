@@ -311,6 +311,21 @@ pub mod v1 {
         pub sig: Vec<u8>,
     }
 
+    /// `GET /v1/bootstrap` response — the signed client bootstrap. `doc` is the
+    /// postcard-encoded `BootstrapDoc`; `sig` is the registry key's Ed25519
+    /// signature over the EXACT bytes of `doc` (domain `lluma-bootstrap-v1`).
+    /// The relay mirrors this blob verbatim and never authors or signs it; the
+    /// client verifies `sig` against its pinned (compiled-in) registry key
+    /// before trusting any field.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub struct SignedBootstrap {
+        #[serde(with = "b64_vec")]
+        pub doc: Vec<u8>,
+        #[serde(with = "b64_vec")]
+        pub sig: Vec<u8>,
+    }
+
     impl HostExecRequest {
         pub fn validate(&self) -> Result<(), ProtoError> {
             if self.sealed.0.is_empty() {

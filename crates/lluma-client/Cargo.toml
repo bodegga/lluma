@@ -8,6 +8,7 @@ license.workspace = true
 lluma-core = { path = "../lluma-core" }
 lluma-crypto = { path = "../lluma-crypto" }
 lluma-net = { path = "../lluma-net" }
+reqwest = { workspace = true }
 blind-rsa-signatures = { workspace = true }
 rand_core = { workspace = true }
 serde_json = { workspace = true }
