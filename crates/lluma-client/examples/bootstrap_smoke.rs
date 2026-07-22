@@ -26,6 +26,27 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         doc.issuer_key_id.iter().map(|b| format!("{b:02x}")).collect::<String>()
     );
     println!("  issued_at_s  : {}", doc.issued_at_s);
+
+    // Prove the bootstrap-derived gateway key actually works over OHTTP: build a
+    // client from the verified doc (ephemeral account — key-config needs none)
+    // and run a live key-config round-trip (client → relay → gateway → origin),
+    // enforcing the pinned issuer key-id. This exercises the full auto-connect
+    // path a fresh install takes on launch.
+    use lluma_client::Client;
+    use lluma_core::wire::{HostPublicKey, Mnemonic, OhttpKeyConfig};
+    let (sk, apk) = lluma_crypto::account::derive_keypair_from_seed(&Mnemonic([201u8; 16]))?;
+    let client = Client::new(
+        &relay,
+        OhttpKeyConfig(doc.gateway_kc.clone()),
+        sk,
+        apk,
+        HostPublicKey(vec![0u8; 32]),
+        [0u8; 32],
+    )
+    .with_expected_issuer_key_id(doc.issuer_key_id);
+    let kc = client.key_config().await?;
+    println!("OK key-config: OHTTP round-trip via the bootstrapped gateway key");
+    println!("  epoch={} denomination={} (issuer key-id pin enforced)", kc.epoch, kc.denomination);
     println!("BOOTSTRAP SMOKE OK (a fresh install would now be connected)");
     Ok(())
 }
