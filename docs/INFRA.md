@@ -90,6 +90,11 @@ network WITHOUT touching the live `lluma.bodegga.net` site zone.
   auto-obtained a Let's Encrypt cert and reverse-proxies 443 → the relay on loopback :8780. Plain
   public :8780 is firewalled off (clients use HTTPS). Full anonymous inference verified over HTTPS.
 - **Production client relay URL:** `https://relay.n.lluma.bodegga.net`.
+- **Signed-bootstrap auto-connect is LIVE (2026-07-21):** the gateway OHTTP key is now
+  persistent (`/var/lib/lluma/gateway_kc.sk`), and `GET /v1/bootstrap` serves a registry-signed
+  bootstrap (`/etc/lluma/bootstrap.bin`) that the desktop app verifies against its pinned
+  registry key `rMOAQi7L8f8R4bW6tNWm8QN5fYIh3RDXWU1WL6aopPw=`. Fresh installs self-configure —
+  no manual endpoint entry. Full procedure + rollback: [`BOOTSTRAP-DEPLOY.md`](BOOTSTRAP-DEPLOY.md).
 - Optional follow-up (defense-in-depth): TLS the relay→gateway hop via `gw.n.lluma.bodegga.net`
   (Caddy on VPS-B → :8782) and set `LLUMA_RELAY_GATEWAY` to it. Not required — that hop is
   firewalled to the relay and the payload is OHTTP-sealed. Also: wire the relay signed-bootstrap

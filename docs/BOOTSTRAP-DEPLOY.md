@@ -4,6 +4,21 @@ Turns on zero-config, verified auto-connect for the desktop app. Additive and
 backward-compatible: absent env vars ⇒ prior behavior. Production topology and
 hosts: see [`INFRA.md`](INFRA.md).
 
+## LIVE (deployed 2026-07-21)
+
+- **Pinned registry public key** (bake into the app as `LLUMA_REGISTRY_PK_B64`):
+  `rMOAQi7L8f8R4bW6tNWm8QN5fYIh3RDXWU1WL6aopPw=`
+- **Gateway key** persisted at `/var/lib/lluma/gateway_kc.sk` (stable across restarts;
+  `LLUMA_GATEWAY_KC_SK_FILE`, gateway unit gained `ReadWritePaths=/var/lib/lluma`).
+- **Signed bootstrap** at `/etc/lluma/bootstrap.bin` (259 B), served at
+  `https://relay.n.lluma.bodegga.net/v1/bootstrap` (`LLUMA_BOOTSTRAP_FILE`).
+- **Verified live:** `bootstrap_smoke` fetches + verifies the blob against the pinned key
+  AND completes an OHTTP key-config round-trip through the deployed gateway key
+  (epoch 1, issuer key-id `ad9c7bc7…873748cf` pinned). Wrong pinned key is rejected.
+- The registry key now signs both the snapshot and the bootstrap (distinct domains).
+
+The steps below are the reproducible procedure (already executed for the values above).
+
 - **Broker/gateway box (DigitalOcean):** `159.65.35.137` — repo at `/opt/lluma`,
   cargo at `/root/.cargo/bin/cargo`, keys in `/etc/lluma/keys/`. Also the Linux
   **build host** for the relay binary.
