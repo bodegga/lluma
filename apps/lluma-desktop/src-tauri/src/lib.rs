@@ -304,7 +304,28 @@ async fn host_start(state: tauri::State<'_, AppState>) -> Result<HostStatus, Str
         return Err("unlock your account first".into());
     }
     let pass = inner.passphrase.clone().ok_or("unlock your account first")?;
-    let cfg = inner.settings.host.clone();
+    let mut cfg = inner.settings.host.clone();
+
+    // Auto-host: if an OpenAI upstream is selected with no base URL, detect a
+    // running local server (Ollama / LM Studio / llama.cpp) and use it — so
+    // "Start serving" just works with zero config. Persist what we found so the
+    // UI reflects it. If nothing is found, guide the user.
+    if matches!(cfg.upstream, types::UpstreamKind::OpenAi) && cfg.openai_base.trim().is_empty() {
+        match host::detect_local_openai().await {
+            Some((base, model)) => {
+                cfg.openai_base = base;
+                if cfg.openai_model.trim().is_empty() {
+                    cfg.openai_model = model;
+                }
+                inner.settings.host = cfg.clone();
+                let _ = inner.settings.save(&state.data_dir);
+            }
+            None => {
+                return Err("no local model server found — start Ollama (ollama serve) or LM Studio, or set a base URL under the upstream options".into());
+            }
+        }
+    }
+
     let (host_sk, _host_pk) = host::load_or_create_host_key(&state.data_dir, &pass)?;
     let handle = HostHandle::start(&cfg, host_sk).await?;
     let status = handle.snapshot_status();

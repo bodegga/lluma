@@ -44,6 +44,46 @@ pub fn select_upstream(cfg: &HostConfig) -> Result<Arc<dyn Upstream>, String> {
     }
 }
 
+/// Probe common local OpenAI-compatible servers and return the first reachable
+/// one as `(base_url, first_model_id)`. Lets "Start serving" work with zero
+/// config when the user already runs Ollama / LM Studio / a llama.cpp server.
+pub async fn detect_local_openai() -> Option<(String, String)> {
+    // (base_url, /models path). Ollama and LM Studio both speak the OpenAI API.
+    const CANDIDATES: &[&str] = &[
+        "http://localhost:11434/v1", // Ollama
+        "http://127.0.0.1:11434/v1",
+        "http://localhost:1234/v1", // LM Studio
+        "http://localhost:8080/v1", // llama.cpp server
+    ];
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(800))
+        .build()
+        .ok()?;
+    for base in CANDIDATES {
+        let url = format!("{base}/models");
+        let Ok(resp) = http.get(&url).send().await else { continue };
+        if !resp.status().is_success() {
+            continue;
+        }
+        let Ok(json) = resp.json::<serde_json::Value>().await else { continue };
+        if let Some(model) = first_model_id(&json) {
+            return Some((base.to_string(), model));
+        }
+    }
+    None
+}
+
+/// Extract the first model id from an OpenAI `/v1/models` response
+/// (`{ "data": [ { "id": "..." } ] }`). Pure + unit-testable.
+fn first_model_id(json: &serde_json::Value) -> Option<String> {
+    json.get("data")?
+        .as_array()?
+        .first()?
+        .get("id")?
+        .as_str()
+        .map(|s| s.to_string())
+}
+
 fn hk_path(dir: &Path) -> PathBuf {
     dir.join("host_key.bin")
 }
@@ -172,6 +212,17 @@ mod tests {
     use lluma_core::proto::v1::HostExecRequest;
     use lluma_core::proto::v1::ExecResponse;
     use lluma_core::wire::SpendId;
+
+    #[test]
+    fn first_model_id_parses_openai_shape() {
+        let j: serde_json::Value = serde_json::json!({
+            "object": "list",
+            "data": [{ "id": "qwen2.5:0.5b", "object": "model" }, { "id": "other" }]
+        });
+        assert_eq!(super::first_model_id(&j).as_deref(), Some("qwen2.5:0.5b"));
+        assert_eq!(super::first_model_id(&serde_json::json!({"data": []})), None);
+        assert_eq!(super::first_model_id(&serde_json::json!({})), None);
+    }
 
     #[test]
     fn port_parsing() {
