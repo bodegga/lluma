@@ -52,6 +52,11 @@ fn build_upstream() -> Arc<dyn Upstream> {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt().with_target(true).with_level(true).init();
 
+    // tokio-tungstenite's rustls build ships no default crypto provider, so a
+    // wss handshake would panic without this. Install `ring` process-wide before
+    // any TLS (dial-in mode never uses TLS, so this is harmless there).
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     let mut rng = rand_core::OsRng;
     let (host_sk, host_pk) = lluma_crypto::e2e::host_keygen(&mut rng)?;
     let pk_b64 = base64::engine::general_purpose::STANDARD.encode(&host_pk.0);
