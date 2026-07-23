@@ -39,8 +39,36 @@ down it and reads sealed responses back. No inbound port on the host.
   `ExecResponse{request_id, ...}` (timeout → `BAD_GATEWAY`); jobs multiplexed by `request_id`.
 - **Unchanged:** sealed envelope (aad=spend_id, HPKE to host key), spend-before-forward, receipts.
 - **Privacy:** broker still never sees plaintext (sealed to host key); host still never sees the
-  client IP (jobs arrive via the broker). The final threat model, framing, auth domain string,
-  and DoS bounds are set by the crypto-architect design review and folded in before implementation.
+  client IP (jobs arrive via the broker). Invariant PRESERVED (crypto-architect confirmed).
+
+**Crypto-architect must-haves (v1, Critical — folded in):**
+1. **TLS mandatory (wss).** Plain ws:// lets an on-path attacker hijack the TCP stream *after* the
+   host authenticates. Terminate TLS at the broker (Caddy on the DO box + a tunnel hostname via
+   ZoneEdit, e.g. `tunnel.n.lluma.bodegga.net`); the host verifies it via WebPKI against a
+   hostname **shipped in the registry-signed bootstrap doc** (extend `BootstrapDoc` with
+   `tunnel_url`). If TLS can't land first, tunnel mode does not ship (dial-in stays).
+2. **Auth handshake:** `Hello{host_account}` → broker `Challenge{32B OsRng, single-use, 5s
+   deadline}` → host `Auth{sig}` where
+   `sig = Ed25519(account_sk, b"lluma-host-tunnel-v1" ‖ challenge[32] ‖ host_account[32] ‖ broker_key_id[32])`
+   (new `TUNNEL_AUTH_DOMAIN` in `lluma-crypto`, distinct from receipt/register/heartbeat/snapshot/
+   bootstrap domains). Uniform failure (no registration-status oracle). Socket replacement ONLY
+   after successful auth; atomic per-account swap with a generation counter; old socket's in-flight
+   jobs fail immediately.
+3. **Liveness + in-flight-capacity check BEFORE the spend txn** (mirror `resolve_active_host`), so a
+   dead/at-capacity socket returns `no_host` without burning the token. No automatic retry in v1
+   (dial-in parity); stranded-token refund is future work (ADR note).
+4. **Resource bounds:** pre-auth 5s deadline + ≤1 KiB; per-IP handshake token-bucket; global socket
+   cap (~4096); exactly 1 socket/account; per-socket in-flight cap (8–32) → `no_host` before spend;
+   30s per-request timeout → `BAD_GATEWAY`; WS ping 20s / drop after 2 missed; bounded send queue;
+   frame length caps pre-parse; and **add a max-length check on `sealed`/response in
+   `proto.rs::validate()`** (currently non-empty only).
+
+**Frames** (JSON, `v:1`, tagged enum, length-capped pre-parse): `Hello`, `Challenge`, `Auth`,
+`AuthOk`, `Job{request_id,spend_id,sealed}`, `Done{request_id,preamble,chunk}`, `Fail{request_id}`.
+request_id scoped to a connection generation; late/unknown responses dropped silently. Endpoint
+`wss://<broker>/v1/host/tunnel` served on the existing ingress listener (path-routed) so
+connection-counting is blunted. Tunnel vs dial-in is invisible to clients (snapshot carries no
+mode flag — unchanged). Implementation gets a crypto-architect code review before deploy.
 
 **Components:** `lluma-core` (tunnel frame DTOs + `request_id`), `lluma-broker` (WS endpoint,
 per-host socket registry, exec routing switch, timeouts/bounds), `lluma-host` (outbound WS client,
