@@ -253,6 +253,50 @@ pub mod v1 {
         pub sealed: SealedRequest,
     }
 
+    /// Upper bound on a sealed request / response chunk (defense against memory
+    /// abuse; matches the relay's 1 MiB body cap). A real sealed prompt is far
+    /// smaller. Enforced in `validate()` and by the tunnel/exec length caps.
+    pub const MAX_SEALED_LEN: usize = 1 << 20;
+
+    /// Reverse-tunnel frames (host ⇄ broker over an authenticated WebSocket).
+    /// JSON, tagged, versioned. The broker length-caps each frame BEFORE parsing;
+    /// `Job`/`Done` additionally bound `sealed`/`chunk` by `MAX_SEALED_LEN`.
+    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[serde(tag = "t", rename_all = "snake_case")]
+    pub enum TunnelFrame {
+        /// host → broker: opens the handshake, naming the account to bind.
+        Hello { v: u8, host_account: [u8; 32] },
+        /// broker → host: single-use 32-byte random challenge.
+        Challenge { v: u8, challenge: [u8; 32] },
+        /// host → broker: Ed25519 sig over the domain-separated auth preimage.
+        Auth {
+            v: u8,
+            #[serde(with = "b64_vec")]
+            sig: Vec<u8>,
+        },
+        /// broker → host: handshake accepted; the socket is now bound.
+        AuthOk { v: u8 },
+        /// broker → host: a job to serve, correlated by `request_id`.
+        Job {
+            v: u8,
+            request_id: u64,
+            spend_id: SpendId,
+            #[serde(with = "b64_sealed")]
+            sealed: SealedRequest,
+        },
+        /// host → broker: the sealed response for `request_id`.
+        Done {
+            v: u8,
+            request_id: u64,
+            #[serde(with = "b64_preamble")]
+            preamble: ResponsePreamble,
+            #[serde(with = "b64_vec")]
+            chunk: Vec<u8>,
+        },
+        /// host → broker: the host could not serve `request_id` (opaque).
+        Fail { v: u8, request_id: u64 },
+    }
+
     /// `POST /v1/host/register` — a host joins the registry. `sig` is the
     /// host's Ed25519 signature over the canonical `HostRegisterBody`;
     /// `pow_nonce` is the broker-issued 8-byte proof-of-work nonce.
@@ -328,7 +372,7 @@ pub mod v1 {
 
     impl HostExecRequest {
         pub fn validate(&self) -> Result<(), ProtoError> {
-            if self.sealed.0.is_empty() {
+            if self.sealed.0.is_empty() || self.sealed.0.len() > MAX_SEALED_LEN {
                 return Err(ProtoError::WrongLength("sealed"));
             }
             Ok(())
@@ -340,7 +384,7 @@ pub mod v1 {
             if self.token.0.len() != 320 {
                 return Err(ProtoError::WrongLength("token"));
             }
-            if self.sealed.0.is_empty() {
+            if self.sealed.0.is_empty() || self.sealed.0.len() > MAX_SEALED_LEN {
                 return Err(ProtoError::WrongLength("sealed"));
             }
             Ok(())
@@ -349,10 +393,10 @@ pub mod v1 {
 
     impl ExecResponse {
         pub fn validate(&self) -> Result<(), ProtoError> {
-            if self.preamble.0.is_empty() {
+            if self.preamble.0.is_empty() || self.preamble.0.len() > MAX_SEALED_LEN {
                 return Err(ProtoError::WrongLength("preamble"));
             }
-            if self.chunk.is_empty() {
+            if self.chunk.is_empty() || self.chunk.len() > MAX_SEALED_LEN {
                 return Err(ProtoError::WrongLength("chunk"));
             }
             Ok(())
