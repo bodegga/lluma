@@ -51,6 +51,14 @@ pub fn verify_bootstrap(
             return Err(ClientError::Protocol);
         }
     }
+    // Sanity-bound the published host-registration difficulty so a mis-signed
+    // absurd value can't make a would-be host grind PoW forever (a real policy
+    // is ~20 bits; the broker rejects a too-low PoW regardless).
+    if let Some(d) = doc.pow_difficulty {
+        if d > 30 {
+            return Err(ClientError::Protocol);
+        }
+    }
     Ok(doc)
 }
 

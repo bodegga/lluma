@@ -132,9 +132,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             let hb_sk = account_sk.clone();
             let hb_pk = host_pk.0.clone();
             tokio::spawn(async move {
-                let mut counter: u64 = 1;
                 let mut fails: u32 = 0;
                 loop {
+                    // Counter = wall-clock seconds so it stays monotonic across
+                    // restarts (the broker rejects a non-increasing counter as a
+                    // replay; a per-process counter from 1 would wedge). (review I1)
+                    let counter = now_unix_s();
                     // First heartbeat fires immediately, then on the interval.
                     match register::heartbeat(&hb_cfg, &hb_sk, host_account, counter).await {
                         Ok(()) => fails = 0,
@@ -151,7 +154,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                     }
-                    counter += 1;
                     tokio::time::sleep(std::time::Duration::from_secs(hb_cfg.heartbeat_interval_s))
                         .await;
                 }
@@ -177,4 +179,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn hex32(b: &[u8; 32]) -> String {
     b.iter().map(|x| format!("{x:02x}")).collect()
+}
+
+fn now_unix_s() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
 }

@@ -42,6 +42,11 @@ pub enum RegisterError {
 fn http() -> Result<reqwest::Client, RegisterError> {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(15))
+        // No redirects: register/heartbeat are signed to a specific origin
+        // (derived from the registry-signed tunnel_url). A proxy misconfig must
+        // never bounce a signed registration elsewhere (review R3, mirrors the
+        // broker's redirect-none exec forwarder).
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| RegisterError::Transport)
 }
@@ -63,12 +68,19 @@ pub async fn register(
     };
     let sig = lluma_crypto::account::host_register_sign(account_sk, &body)
         .map_err(|_| RegisterError::Sign)?;
-    let nonce = lluma_crypto::account::pow_solve(
-        lluma_crypto::account::POW_HOST_DOMAIN,
-        &host_account,
-        &cfg.epoch_salt,
-        cfg.pow_difficulty,
-    );
+    // PoW is a synchronous grind (up to minutes at high difficulty); run it off
+    // the async runtime so it can't block a worker thread (review M1).
+    let (salt, difficulty) = (cfg.epoch_salt, cfg.pow_difficulty);
+    let nonce = tokio::task::spawn_blocking(move || {
+        lluma_crypto::account::pow_solve(
+            lluma_crypto::account::POW_HOST_DOMAIN,
+            &host_account,
+            &salt,
+            difficulty,
+        )
+    })
+    .await
+    .map_err(|_| RegisterError::Transport)?;
     let req = HostRegisterRequest { body, sig: sig.0, pow_nonce: nonce.to_vec() };
     let bytes = serde_json::to_vec(&req).map_err(|_| RegisterError::Sign)?;
     post(&cfg.broker_ingress, "/v1/host/register", bytes).await

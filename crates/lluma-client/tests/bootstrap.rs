@@ -16,6 +16,8 @@ fn sample_doc() -> BootstrapDoc {
         issuer_key_id: [9u8; 32],
         issued_at_s: 1_700_000_000,
         tunnel_url: None,
+        pow_difficulty: None,
+        epoch_salt: None,
     }
 }
 

@@ -32,6 +32,13 @@ pub struct VerifiedNet {
     pub registry_pk: AccountPublicKey,
     /// Pinned issuer key-id, when known (from the signed bootstrap).
     pub issuer_key_id: Option<[u8; 32]>,
+    /// Reverse-tunnel endpoint (wss://…/v1/host/tunnel) from the signed bootstrap,
+    /// when the network offers NAT-free hosting. Trusted because it's registry-signed.
+    pub tunnel_url: Option<String>,
+    /// Published host-registration params (also registry-signed) so this device
+    /// can self-register as a tunnel host: current epoch PoW salt + difficulty.
+    pub epoch_salt: Option<[u8; 32]>,
+    pub pow_difficulty: Option<u32>,
 }
 
 /// Decode manually-entered endpoint material (self-host/dev only) into a
@@ -39,7 +46,15 @@ pub struct VerifiedNet {
 pub fn manual_verified(s: &Settings) -> Result<VerifiedNet, String> {
     let gateway_kc = OhttpKeyConfig(b64d(&s.gateway_kc_b64, "gateway key-config")?);
     let registry_pk = AccountPublicKey(b64d(&s.registry_pk_b64, "registry pubkey")?);
-    Ok(VerifiedNet { gateway_kc, registry_pk, issuer_key_id: None })
+    // Self-host/dev builds don't carry signed tunnel/registration params.
+    Ok(VerifiedNet {
+        gateway_kc,
+        registry_pk,
+        issuer_key_id: None,
+        tunnel_url: None,
+        epoch_salt: None,
+        pow_difficulty: None,
+    })
 }
 
 /// Build a `Client` from the relay URL + account keys + the session's verified

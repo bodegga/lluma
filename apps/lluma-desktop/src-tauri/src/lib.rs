@@ -223,6 +223,9 @@ async fn auto_connect(state: tauri::State<'_, AppState>) -> Result<NetworkStatus
             gateway_kc: lluma_core::wire::OhttpKeyConfig(doc.gateway_kc.clone()),
             registry_pk: anchor_pk.clone(),
             issuer_key_id: Some(doc.issuer_key_id),
+            tunnel_url: doc.tunnel_url.clone(),
+            epoch_salt: doc.epoch_salt,
+            pow_difficulty: doc.pow_difficulty,
         });
         // Cache for display only (never trusted for verification).
         inner.settings.gateway_kc_b64 =
@@ -327,7 +330,7 @@ async fn host_start(
     // (below) can take minutes (model download); holding the lock would freeze
     // every other command. Live progress reaches the UI via `host-progress`
     // events, not via polling this lock.
-    let (mut cfg, pass, consent) = {
+    let (mut cfg, pass, consent, verified) = {
         let inner = state.inner.lock().await;
         if inner.account.is_none() {
             return Err("unlock your account first".into());
@@ -336,7 +339,12 @@ async fn host_start(
             return Err("already serving — stop first".into());
         }
         let pass = inner.passphrase.clone().ok_or("unlock your account first")?;
-        (inner.settings.host.clone(), pass, inner.settings.ollama_install_consent)
+        (
+            inner.settings.host.clone(),
+            pass,
+            inner.settings.ollama_install_consent,
+            inner.verified.clone(),
+        )
     };
 
     // Phase 2 — auto-host (no lock held). If an OpenAI upstream is selected with
@@ -381,16 +389,62 @@ async fn host_start(
         }
     }
 
-    let (host_sk, _host_pk) = match host::load_or_create_host_key(&state.data_dir, &pass) {
+    let (host_sk, host_pk) = match host::load_or_create_host_key(&state.data_dir, &pass) {
         Ok(k) => k,
         Err(e) => {
             reap(&mut managed_ollama).await;
             return Err(e);
         }
     };
-    // HostHandle::start takes ownership of the child and reaps it on its own
-    // internal failures, so from here the child can no longer strand.
-    let handle = HostHandle::start(&cfg, host_sk, managed_ollama).await?;
+
+    // Prefer NAT-free tunnel hosting when the signed bootstrap offers it (tunnel
+    // URL + published registration params). Otherwise fall back to dial-in.
+    // Hosting uses a SEPARATE device-local host identity — never the user's
+    // spending account — so the broker never links spend_account ↔ home IP
+    // (crypto-architect R2). HostHandle::start* takes ownership of the managed
+    // Ollama child and reaps it on its own failures.
+    let tunnel = verified.as_ref().and_then(|v| {
+        match (v.tunnel_url.clone(), v.epoch_salt, v.pow_difficulty) {
+            (Some(url), Some(salt), Some(diff)) => {
+                <[u8; 32]>::try_from(v.registry_pk.0.as_slice())
+                    .ok()
+                    .map(|bkid| (url, salt, diff, bkid))
+            }
+            _ => None,
+        }
+    });
+
+    let handle = if let Some((url, salt, diff, broker_key_id)) = tunnel {
+        let (acct_sk, acct_pk) = match host::load_or_create_host_account(&state.data_dir, &pass) {
+            Ok(k) => k,
+            Err(e) => {
+                reap(&mut managed_ollama).await;
+                return Err(e);
+            }
+        };
+        let host_account: [u8; 32] = match acct_pk.0.as_slice().try_into() {
+            Ok(a) => a,
+            Err(_) => {
+                reap(&mut managed_ollama).await;
+                return Err("host account key is not 32 bytes".into());
+            }
+        };
+        HostHandle::start_tunnel(
+            &cfg,
+            url,
+            broker_key_id,
+            salt,
+            diff,
+            host_sk,
+            host_pk,
+            acct_sk,
+            host_account,
+            managed_ollama,
+        )
+        .await?
+    } else {
+        HostHandle::start(&cfg, host_sk, managed_ollama).await?
+    };
     let status = handle.snapshot_status();
 
     // Phase 3 — re-acquire the lock to persist the resolved upstream and store

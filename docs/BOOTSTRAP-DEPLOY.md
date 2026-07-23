@@ -128,16 +128,24 @@ the new blob (trailing bytes ignored), so blob-first is safe.
    Follow-up: per-IP handshake rate limiting belongs here (the app bounds
    concurrent pre-auth handshakes, but not per-source rate) — needs a Caddy
    rate-limit build; tracked, not yet applied.
-3. **Re-sign the bootstrap WITH the tunnel URL** (reuse the live `$GWKC`/`$KID`):
+3. **Re-sign the bootstrap WITH the tunnel URL + published registration params**
+   (reuse the live `$GWKC`/`$KID`; `$SALT` = `base64 -w0 /etc/lluma/keys/epoch_salt.bin`):
    ```bash
    /opt/lluma/target/release/lluma-bootstrap sign \
      --registry-sk /etc/lluma/keys/registry.sk \
      --relay https://relay.n.lluma.bodegga.net \
      --gateway-kc-b64 "$GWKC" --issuer-key-id-hex "$KID" \
      --tunnel-url wss://tunnel.n.lluma.bodegga.net/v1/host/tunnel \
+     --pow-difficulty 20 --epoch-salt-b64 "$SALT" \
      --out /tmp/bootstrap.bin
    ```
-   Then deploy the blob to the relay (step 5 above) and restart the relay.
+   `--pow-difficulty`/`--epoch-salt-b64` publish the (public) host-registration
+   params so GUI users can self-register as tunnel hosts (ADR-0004). Then deploy
+   the blob to the relay (step 5 above) and restart the relay.
+   **Rotation coupling:** the epoch salt is now published in the signed bootstrap,
+   so rotating it requires re-sign → republish → restart relay. Keep the broker's
+   `epoch_salt_prev` accept-window until the old blob has aged out of client
+   caches, or GUI hosts on a stale doc get `BadPow`.
 4. **Redeploy the broker** (the ws endpoint ships in the broker binary):
    `cargo build --release -p lluma-broker`; install; `systemctl restart lluma-broker`.
 5. **A tunnel host** runs `lluma-host` with `LLUMA_TUNNEL_URL=wss://tunnel.n…`

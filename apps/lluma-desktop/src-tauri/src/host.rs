@@ -12,10 +12,34 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use lluma_core::wire::{HostPublicKey, HostSecretKey, KeystoreBlob};
+use lluma_core::wire::{
+    AccountPublicKey, AccountSecretKey, HostPublicKey, HostSecretKey, KeystoreBlob,
+};
+use lluma_core::ModelId;
+use lluma_host::register::{self, RegisterConfig};
+use lluma_host::tunnel::{self, TunnelConfig};
 use lluma_host::{EchoUpstream, HostState, OpenAiUpstream, Upstream};
 
 use crate::types::{HostConfig, HostStatus, UpstreamKind};
+
+/// Derive the broker ingress origin (for register/heartbeat) from the signed
+/// `tunnel_url`: strictly `wss://host[:port]/…` → `https://host[:port]`. Refusing
+/// any non-wss scheme keeps registration TLS-only (crypto-architect R3).
+pub fn ingress_from_tunnel_url(tunnel_url: &str) -> Result<String, String> {
+    let u = reqwest::Url::parse(tunnel_url).map_err(|_| "tunnel_url is not a valid URL")?;
+    if u.scheme() != "wss" {
+        return Err("tunnel_url must be wss://".into());
+    }
+    // Defensively reject embedded credentials even though verify_bootstrap
+    // already does (this fn is pub and could be fed an unvetted URL) — never
+    // silently strip userinfo (review M3).
+    if !u.username().is_empty() || u.password().is_some() {
+        return Err("tunnel_url must not contain credentials".into());
+    }
+    let host = u.host_str().ok_or("tunnel_url has no host")?;
+    let port = u.port().map(|p| format!(":{p}")).unwrap_or_default();
+    Ok(format!("https://{host}{port}"))
+}
 
 /// Select the upstream model implementation from the host config.
 pub fn select_upstream(cfg: &HostConfig) -> Result<Arc<dyn Upstream>, String> {
@@ -93,12 +117,15 @@ pub fn load_or_create_host_key(
     dir: &Path,
     passphrase: &str,
 ) -> Result<(HostSecretKey, HostPublicKey), String> {
-    if let Ok(bytes) = std::fs::read(hk_path(dir)) {
-        if let Ok(pt) = lluma_crypto::account::open_bytes(passphrase, &KeystoreBlob(bytes)) {
-            let (sk, pk): (Vec<u8>, Vec<u8>) =
-                postcard::from_bytes(&pt).map_err(|e| e.to_string())?;
-            return Ok((HostSecretKey(sk), HostPublicKey(pk)));
-        }
+    // Only mint a new key when the file is ABSENT. If it exists but won't unlock,
+    // fail loudly rather than silently rotating the host key (review I2).
+    if hk_path(dir).exists() {
+        let bytes = std::fs::read(hk_path(dir)).map_err(|e| e.to_string())?;
+        let pt = lluma_crypto::account::open_bytes(passphrase, &KeystoreBlob(bytes)).map_err(
+            |_| "host key exists but could not be unlocked — restore your passphrase (or delete host_key.bin to mint a new one)".to_string(),
+        )?;
+        let (sk, pk): (Vec<u8>, Vec<u8>) = postcard::from_bytes(&pt).map_err(|e| e.to_string())?;
+        return Ok((HostSecretKey(sk), HostPublicKey(pk)));
     }
     let mut rng = rand_core::OsRng;
     let (sk, pk) = lluma_crypto::e2e::host_keygen(&mut rng).map_err(|e| e.to_string())?;
@@ -107,6 +134,52 @@ pub fn load_or_create_host_key(
         lluma_crypto::account::seal_bytes(&mut rng, passphrase, &plain).map_err(|e| e.to_string())?;
     std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     std::fs::write(hk_path(dir), &blob.0).map_err(|e| e.to_string())?;
+    Ok((sk, pk))
+}
+
+fn ha_path(dir: &Path) -> PathBuf {
+    dir.join("host_account.bin")
+}
+
+fn now_unix_s() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// Load (or create on first use) the device-local HOST account Ed25519 keypair —
+/// a pseudonym DISTINCT from the user's spending account. Hosting registers +
+/// heartbeats + tunnels from the user's home IP; using a separate identity means
+/// the broker never learns `spend_account ↔ IP` (crypto-architect R2 / leak L16).
+/// Persisted sealed under the passphrase; device-local (host earnings accrue to
+/// this pseudonym — mnemonic-recoverable earnings is a documented follow-up).
+pub fn load_or_create_host_account(
+    dir: &Path,
+    passphrase: &str,
+) -> Result<(AccountSecretKey, AccountPublicKey), String> {
+    // Only mint a new host identity when the file is ABSENT. If it exists but
+    // won't unlock, fail loudly — silently rotating would orphan accrued earnings
+    // and, via the reused HPKE key, link the old and new host pseudonyms (I2).
+    if ha_path(dir).exists() {
+        let bytes = std::fs::read(ha_path(dir)).map_err(|e| e.to_string())?;
+        let pt = lluma_crypto::account::open_bytes(passphrase, &KeystoreBlob(bytes)).map_err(
+            |_| "host identity exists but could not be unlocked — restore your passphrase (or delete host_account.bin to start a new host identity)".to_string(),
+        )?;
+        if pt.len() != 32 {
+            return Err("host identity file is corrupt".into());
+        }
+        let sk = AccountSecretKey(pt);
+        let pk = lluma_crypto::account::account_public_from_secret(&sk).map_err(|e| e.to_string())?;
+        return Ok((sk, pk));
+    }
+    let mut rng = rand_core::OsRng;
+    let m = lluma_crypto::account::account_mnemonic_new(&mut rng).map_err(|e| e.to_string())?;
+    let (sk, pk) = lluma_crypto::account::derive_keypair_from_seed(&m).map_err(|e| e.to_string())?;
+    let blob =
+        lluma_crypto::account::seal_bytes(&mut rng, passphrase, &sk.0).map_err(|e| e.to_string())?;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    std::fs::write(ha_path(dir), &blob.0).map_err(|e| e.to_string())?;
     Ok((sk, pk))
 }
 
@@ -153,7 +226,7 @@ pub fn spawn_serve(
 /// held here so "Stop serving" tears it down too (a server the user was already
 /// running is never captured, so it is never killed).
 pub struct HostHandle {
-    task: tokio::task::JoinHandle<()>,
+    tasks: Vec<tokio::task::JoinHandle<()>>,
     managed_ollama: Option<tokio::process::Child>,
     pub status: Arc<Mutex<HostStatus>>,
 }
@@ -210,7 +283,111 @@ impl HostHandle {
                 "listening locally — confirm your ingress is reachable from the internet".into()
             },
         }));
-        Ok(HostHandle { task, managed_ollama, status })
+        Ok(HostHandle { tasks: vec![task], managed_ollama, status })
+    }
+
+    /// Start serving over the reverse tunnel (NAT-free): register this device's
+    /// host pseudonym with the broker (PoW), heartbeat to stay admitted, and hold
+    /// an outbound wss over which the broker pushes sealed jobs. No inbound port.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn start_tunnel(
+        cfg: &HostConfig,
+        tunnel_url: String,
+        broker_key_id: [u8; 32],
+        epoch_salt: [u8; 32],
+        pow_difficulty: u32,
+        host_sk: HostSecretKey,
+        host_pk: HostPublicKey,
+        account_sk: AccountSecretKey,
+        host_account: [u8; 32],
+        managed_ollama: Option<tokio::process::Child>,
+    ) -> Result<HostHandle, String> {
+        let mut managed_ollama = managed_ollama;
+        macro_rules! bail {
+            ($e:expr) => {{
+                if let Some(mut c) = managed_ollama.take() {
+                    let _ = c.kill().await;
+                }
+                return Err($e);
+            }};
+        }
+        let upstream = match select_upstream(cfg) {
+            Ok(u) => u,
+            Err(e) => bail!(e),
+        };
+        let broker_ingress = match ingress_from_tunnel_url(&tunnel_url) {
+            Ok(b) => b,
+            Err(e) => bail!(e),
+        };
+        let model_label = if cfg.model_id.trim().is_empty() {
+            cfg.openai_model.clone()
+        } else {
+            cfg.model_id.clone()
+        };
+        let rcfg = RegisterConfig {
+            broker_ingress,
+            epoch_salt,
+            pow_difficulty,
+            heartbeat_interval_s: 30,
+            models: vec![ModelId(model_label)],
+        };
+        // Register (PoW) before dialing so the broker admits + can auth the socket.
+        if let Err(e) = register::register(&rcfg, &account_sk, host_account, &host_pk.0).await {
+            bail!(format!("host registration failed: {e:?}"));
+        }
+
+        let status = Arc::new(Mutex::new(HostStatus {
+            running: true,
+            reachable: true, // NAT-free: reachability is the outbound socket itself
+            state: "serving via tunnel".into(),
+            credits_earned: 0,
+            requests_served: 0,
+            message: "serving over the reverse tunnel (no inbound port needed)".into(),
+        }));
+
+        // Heartbeat loop. The counter is wall-clock seconds so it stays strictly
+        // monotonic across app restarts — the broker rejects a non-increasing
+        // counter as a replay, so a per-process counter starting at 1 would wedge
+        // a restarted host for hours (review I1). Admission loss is surfaced into
+        // the status the UI polls, rather than silently claiming "serving" (M2).
+        let hb_cfg = rcfg.clone();
+        let hb_sk = account_sk.clone();
+        let hb_pk = host_pk.0.clone();
+        let hb_status = status.clone();
+        let heartbeat = tokio::spawn(async move {
+            let mut fails: u32 = 0;
+            loop {
+                let counter = now_unix_s();
+                match register::heartbeat(&hb_cfg, &hb_sk, host_account, counter).await {
+                    Ok(()) => {
+                        fails = 0;
+                        if let Ok(mut s) = hb_status.lock() {
+                            s.state = "serving via tunnel".into();
+                            s.message =
+                                "serving over the reverse tunnel (no inbound port needed)".into();
+                        }
+                    }
+                    Err(_) => {
+                        fails += 1;
+                        if fails >= 3 {
+                            let _ = register::register(&hb_cfg, &hb_sk, host_account, &hb_pk).await;
+                            if let Ok(mut s) = hb_status.lock() {
+                                s.state = "reconnecting".into();
+                                s.message = "lost broker admission — retrying registration".into();
+                            }
+                        }
+                    }
+                }
+                tokio::time::sleep(std::time::Duration::from_secs(hb_cfg.heartbeat_interval_s)).await;
+            }
+        });
+
+        // Outbound tunnel (reconnects forever).
+        let tcfg = TunnelConfig { url: tunnel_url, host_account, account_sk, broker_key_id };
+        let host_sk = Arc::new(host_sk);
+        let tunnel_task = tokio::spawn(async move { tunnel::run(tcfg, host_sk, upstream).await });
+
+        Ok(HostHandle { tasks: vec![heartbeat, tunnel_task], managed_ollama, status })
     }
 
     pub fn snapshot_status(&self) -> HostStatus {
@@ -220,9 +397,12 @@ impl HostHandle {
             .unwrap_or_default()
     }
 
-    /// Stop serving and, if the app started a local Ollama server, stop that too.
+    /// Stop serving (all tasks: serve/tunnel/heartbeat) and, if the app started a
+    /// local Ollama server, stop that too.
     pub async fn stop(self) {
-        self.task.abort();
+        for t in &self.tasks {
+            t.abort();
+        }
         if let Some(mut child) = self.managed_ollama {
             let _ = child.kill().await;
         }

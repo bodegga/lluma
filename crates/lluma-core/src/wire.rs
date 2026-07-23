@@ -222,6 +222,14 @@ pub struct BootstrapDoc {
     /// verifies the broker's TLS against its hostname — only because it is
     /// registry-signed here, so a malicious relay cannot substitute its own.
     pub tunnel_url: Option<String>,
+    /// Host-registration PoW difficulty (leading zero bits), published so a
+    /// desktop user can self-register as a tunnel host. Appended (one-way compat,
+    /// like `tunnel_url`). `None` ⇒ not published (GUI hosting unavailable).
+    pub pow_difficulty: Option<u32>,
+    /// Current epoch PoW salt (32 B). Public by design — every host needs it to
+    /// register; signing it here stops a malicious relay handing a precomputed
+    /// or weak salt. Appended last (one-way compat). `None` ⇒ not published.
+    pub epoch_salt: Option<[u8; 32]>,
 }
 
 #[cfg(test)]

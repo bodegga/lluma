@@ -10,11 +10,14 @@
 //!
 //!   lluma-bootstrap sign --registry-sk <file> --relay <url> \
 //!       --gateway-kc-b64 <b64> --issuer-key-id-hex <hex64> \
-//!       [--tunnel-url <wss_url>] [--issued-at <unix_s>] --out <blob_file>
+//!       [--tunnel-url <wss_url>] [--pow-difficulty <bits>] \
+//!       [--epoch-salt-b64 <b64_32B>] [--issued-at <unix_s>] --out <blob_file>
 //!       → writes the signed SignedBootstrap JSON blob to <blob_file>; place it
 //!         on the relay and point LLUMA_BOOTSTRAP_FILE at it. `--tunnel-url`, if
 //!         given, MUST be wss:// (a NAT-bound host dials it and verifies the
-//!         broker's TLS against its hostname).
+//!         broker's TLS against its hostname). `--pow-difficulty`/`--epoch-salt-b64`
+//!         publish the (public) host-registration params so GUI users can
+//!         self-register as tunnel hosts.
 
 use base64::Engine;
 
@@ -102,6 +105,32 @@ fn run() -> Result<(), String> {
                 Some(_) => return Err("--tunnel-url must be a wss:// URL".into()),
                 None => None,
             };
+            // Optional published host-registration params (for GUI tunnel hosts).
+            let pow_difficulty = match f.get("pow-difficulty") {
+                Some(v) => {
+                    let d = v.parse::<u32>().map_err(|e| format!("bad --pow-difficulty: {e}"))?;
+                    // The client rejects the WHOLE doc (chat included, not just
+                    // hosting) if difficulty > 30, so guard here against an
+                    // operator typo bricking every anchored client (review M5).
+                    if d > 30 {
+                        return Err(format!(
+                            "--pow-difficulty {d} exceeds the client cap of 30 (would brick all clients)"
+                        ));
+                    }
+                    Some(d)
+                }
+                None => None,
+            };
+            let epoch_salt = match f.get("epoch-salt-b64") {
+                Some(v) => {
+                    let bytes = b64d(v)?;
+                    Some(
+                        <[u8; 32]>::try_from(bytes.as_slice())
+                            .map_err(|_| "--epoch-salt-b64 must decode to 32 bytes".to_string())?,
+                    )
+                }
+                None => None,
+            };
 
             let doc = BootstrapDoc {
                 version: 1,
@@ -110,6 +139,8 @@ fn run() -> Result<(), String> {
                 issuer_key_id,
                 issued_at_s,
                 tunnel_url,
+                pow_difficulty,
+                epoch_salt,
             };
             let doc_bytes = postcard::to_stdvec(&doc).map_err(|e| format!("encode: {e}"))?;
             let sig = bootstrap_sign(&sk, &doc_bytes).map_err(|e| e.to_string())?;

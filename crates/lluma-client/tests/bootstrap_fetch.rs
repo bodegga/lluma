@@ -45,6 +45,8 @@ fn signed_blob() -> (Vec<u8>, lluma_core::wire::AccountPublicKey) {
         issuer_key_id: [4u8; 32],
         issued_at_s: 1_721_500_000,
         tunnel_url: None,
+        pow_difficulty: None,
+        epoch_salt: None,
     };
     let doc_bytes = postcard::to_stdvec(&doc).unwrap();
     let sig = bootstrap_sign(&sk, &doc_bytes).unwrap();
