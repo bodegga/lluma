@@ -46,9 +46,16 @@ NAT-bound hosts serve without a public IP via an outbound wss to the broker.
   (327 B), pinned key unchanged (`rMOA…pPw=`); verified live via `bootstrap_smoke`.
 - **Verified live:** an external host (from the Vultr box) registered, dialed the
   wss endpoint, authenticated, and the broker logged `tunnel socket registered`.
-- **Follow-ups:** desktop Contribute tab not yet wired to tunnel mode (standalone
-  `lluma-host` bin is, via `LLUMA_TUNNEL_URL`); per-IP handshake rate limiting at
-  Caddy (needs a rate-limit build); full funded tunnel exec (needs credit grant).
+- **GUI hosting (LIVE 2026-07-23):** the desktop Contribute tab hosts over the
+  tunnel automatically. The signed bootstrap now also publishes `pow_difficulty`
+  (20) + `epoch_salt` so a GUI user can self-register (ADR-0004); the desktop
+  hosts under a SEPARATE on-device identity (`host_account.bin`), never the spend
+  account, so the broker never learns spend_account↔IP. Blob is 371 B, verified
+  via `bootstrap_smoke`. Verified live: a host using the bootstrap-published salt/
+  difficulty + `https://tunnel.n` register origin authenticates + registers a socket.
+- **Follow-ups:** per-IP handshake rate limiting at Caddy (needs a rate-limit
+  build); full funded tunnel exec (needs credit grant); mnemonic-recoverable host
+  earnings + unified "one balance" GUI (ADR-0004 roadmap).
 
 ## Hosts (live)
 
