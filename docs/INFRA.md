@@ -26,6 +26,30 @@ client ──TLS──▶  RELAY (Vultr)  ──▶  GATEWAY + co-located ISSUER
                                     broker ──▶ serving hosts (register via ingress; PoW + admission)
 ```
 
+## Reverse tunnel (LIVE 2026-07-23)
+
+NAT-bound hosts serve without a public IP via an outbound wss to the broker.
+
+- **DNS:** `tunnel.n.lluma.bodegga.net` A → `159.65.35.137` (broker box). NOTE: the
+  `n.lluma.bodegga.net` subzone is delegated to **DigitalOcean** nameservers
+  (`ns1/2/3.digitalocean.com`), so this record is managed with `doctl compute
+  domain records ... n.lluma.bodegga.net` — NOT ZoneEdit (which holds the parent
+  `bodegga.net`).
+- **TLS:** Caddy on the broker box (Ubuntu 24.04) TLS-fronts
+  `tunnel.n.lluma.bodegga.net` (Let's Encrypt) → `reverse_proxy 127.0.0.1:8081`
+  (broker ingress). `/etc/caddy/Caddyfile`; ufw opened 80/443.
+- **Broker:** the ws endpoint `/v1/host/tunnel` ships in the broker binary
+  (redeployed 2026-07-23). Host auth = Ed25519 over the signed challenge, bound to
+  the registry pubkey; tunnel host registers with sentinel ingress
+  `https://tunnel.invalid`.
+- **Bootstrap:** re-signed with `tunnel_url=wss://tunnel.n.lluma.bodegga.net/v1/host/tunnel`
+  (327 B), pinned key unchanged (`rMOA…pPw=`); verified live via `bootstrap_smoke`.
+- **Verified live:** an external host (from the Vultr box) registered, dialed the
+  wss endpoint, authenticated, and the broker logged `tunnel socket registered`.
+- **Follow-ups:** desktop Contribute tab not yet wired to tunnel mode (standalone
+  `lluma-host` bin is, via `LLUMA_TUNNEL_URL`); per-IP handshake rate limiting at
+  Caddy (needs a rate-limit build); full funded tunnel exec (needs credit grant).
+
 ## Hosts (live)
 
 | Role | Provider | Name | Public IP | Ports | Status |
