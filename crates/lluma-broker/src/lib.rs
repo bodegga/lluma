@@ -19,6 +19,7 @@ pub mod snapshot;
 pub mod spent;
 pub mod store;
 pub mod trial;
+pub mod tunnel;
 
 pub use config::BrokerConfig;
 pub use error::BrokerError;
@@ -28,6 +29,7 @@ pub use receipts::{ingest, IngestOutcome};
 pub use registry::{heartbeat, register, HeartbeatOutcome, RegisterOutcome};
 pub use spent::RedbSpentSet;
 pub use service::{ingress_router, router, BrokerState};
+pub use tunnel::{TunnelRegistry, TUNNEL_PATH};
 pub use snapshot::{publish as publish_snapshot, verify as verify_snapshot, SNAPSHOT_BUCKET};
 pub use store::Store;
 pub use trial::{grant_trial, TrialOutcome};

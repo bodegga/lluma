@@ -9,6 +9,7 @@
 //! and the response is E2E-sealed so no relay/gateway/broker can read it.
 
 pub mod openai;
+pub mod tunnel;
 pub use openai::OpenAiUpstream;
 
 use std::future::Future;
@@ -23,7 +24,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 
 use lluma_core::proto::v1::{ExecResponse, HostExecRequest};
-use lluma_core::wire::HostSecretKey;
+use lluma_core::wire::{HostSecretKey, SealedRequest, SpendId};
 
 /// An upstream failure. Opaque (L8) — never carries prompt bytes or a provider
 /// `Display` to the wire.
@@ -83,6 +84,43 @@ fn err(status: StatusCode, code: &'static str) -> Response {
     (status, Json(serde_json::json!({ "code": code, "message": code }))).into_response()
 }
 
+/// A serving failure, mapped to a status by the HTTP handler and to a `Fail`
+/// frame by the tunnel. Opaque — carries no prompt bytes or provider detail.
+#[derive(Debug, Clone, Copy)]
+pub enum ServeError {
+    /// The seal did not open (aad/spend_id mismatch or tamper) — the upstream
+    /// was NOT called. Fails closed.
+    Seal,
+    /// The upstream model call failed — never seal a fabricated answer.
+    Upstream,
+    /// A local sealing/setup error after a valid open.
+    Internal,
+}
+
+/// The core serving-crypto path, shared by the dial-in HTTP handler and the
+/// reverse tunnel: open the sealed request with `host_sk` (aad = `spend_id` —
+/// the #1 AAD contract), run the prompt through `upstream`, and seal the answer
+/// to the client's session key as a single final chunk. The host sees the
+/// prompt plaintext but never the originator IP; the response is E2E-sealed.
+pub async fn serve_sealed(
+    host_sk: &HostSecretKey,
+    spend_id: &SpendId,
+    sealed: &SealedRequest,
+    upstream: &dyn Upstream,
+) -> Result<ExecResponse, ServeError> {
+    // Open — fails closed on any aad/spend_id mismatch or tamper.
+    let (prompt, reply_to) = lluma_crypto::e2e::e2e_open(host_sk, &spend_id.0, sealed)
+        .map_err(|_| ServeError::Seal)?;
+    let answer = upstream.complete(&prompt).await.map_err(|_| ServeError::Upstream)?;
+    // Seal the response to the client's session key (single final chunk).
+    let mut rng = rand_core::OsRng;
+    let (mut hctx, preamble) =
+        lluma_crypto::e2e::response_setup_host(&mut rng, &reply_to).map_err(|_| ServeError::Internal)?;
+    let chunk = lluma_crypto::e2e::response_seal_chunk(&mut hctx, &answer, true)
+        .map_err(|_| ServeError::Internal)?;
+    Ok(ExecResponse { preamble, chunk })
+}
+
 async fn exec(State(st): State<HostState>, body: Bytes) -> Response {
     let req: HostExecRequest = match serde_json::from_slice(&body) {
         Ok(r) => r,
@@ -91,40 +129,17 @@ async fn exec(State(st): State<HostState>, body: Bytes) -> Response {
     if req.validate().is_err() {
         return err(StatusCode::UNPROCESSABLE_ENTITY, "bad_request");
     }
-    // Open the seal — aad = spend_id (the AAD contract). Fails closed on any
-    // mismatch/tamper; the upstream is NOT called if this fails.
-    let (prompt, reply_to) =
-        match lluma_crypto::e2e::e2e_open(&st.host_sk, &req.spend_id.0, &req.sealed) {
-            Ok(v) => v,
-            Err(_) => return err(StatusCode::UNPROCESSABLE_ENTITY, "seal_invalid"),
-        };
-
-    let answer = match st.upstream.complete(&prompt).await {
-        Ok(a) => a,
-        // Upstream failed — return a 502; never seal a fabricated answer.
-        Err(_) => return err(StatusCode::BAD_GATEWAY, "upstream"),
-    };
-
-    // Seal the response to the client's session key (single final chunk).
-    let mut rng = rand_core::OsRng;
-    let (mut hctx, preamble) = match lluma_crypto::e2e::response_setup_host(&mut rng, &reply_to) {
-        Ok(v) => v,
-        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
-    };
-    let chunk = match lluma_crypto::e2e::response_seal_chunk(&mut hctx, &answer, true) {
-        Ok(c) => c,
-        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
-    };
-    let body = match serde_json::to_vec(&ExecResponse { preamble, chunk }) {
-        Ok(b) => b,
-        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
-    };
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/json")],
-        body,
-    )
-        .into_response()
+    match serve_sealed(&st.host_sk, &req.spend_id, &req.sealed, st.upstream.as_ref()).await {
+        Ok(resp) => match serde_json::to_vec(&resp) {
+            Ok(body) => {
+                (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], body).into_response()
+            }
+            Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+        },
+        Err(ServeError::Seal) => err(StatusCode::UNPROCESSABLE_ENTITY, "seal_invalid"),
+        Err(ServeError::Upstream) => err(StatusCode::BAD_GATEWAY, "upstream"),
+        Err(ServeError::Internal) => err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+    }
 }
 
 #[cfg(test)]

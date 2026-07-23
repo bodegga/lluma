@@ -47,12 +47,18 @@ pub struct BrokerState {
     pub cfg: BrokerConfig,
     /// Dedicated registry Ed25519 secret key for signing snapshots (R10).
     pub registry_sk: Arc<AccountSecretKey>,
+    /// The registry Ed25519 PUBLIC key (32 B), derived from `registry_sk`. Used
+    /// as the `broker_key_id` a host binds into its tunnel-auth signature — the
+    /// host already trusts this key via the signed bootstrap.
+    pub registry_pk: [u8; 32],
     pub admin_secret: Arc<String>,
     /// Wall-clock source (injected for deterministic tests).
     pub now_unix_s: fn() -> u64,
     /// Forwarding client — **redirect-none** so a registered origin cannot 302
     /// to an internal address (SSRF; Fable MF7).
     pub http: reqwest::Client,
+    /// Live reverse-tunnel sockets (host_account → socket). Empty for dial-in.
+    pub tunnels: Arc<crate::tunnel::TunnelRegistry>,
 }
 
 impl BrokerState {
@@ -71,15 +77,25 @@ impl BrokerState {
             .connect_timeout(std::time::Duration::from_secs(5))
             .build()
             .unwrap_or_else(|_| reqwest::Client::new());
+        // Derive the registry public key (the tunnel `broker_key_id`). A bad
+        // secret key would already have failed snapshot signing; fall back to
+        // all-zero (which no genuine host can produce a matching sig for) rather
+        // than panic in a library constructor.
+        let registry_pk = lluma_crypto::account::account_public_from_secret(&registry_sk)
+            .ok()
+            .and_then(|pk| <[u8; 32]>::try_from(pk.0.as_slice()).ok())
+            .unwrap_or([0u8; 32]);
         Self {
             issuer_pk: Arc::new(issuer_pk),
             key_id,
             store,
             cfg,
             registry_sk: Arc::new(registry_sk),
+            registry_pk,
             admin_secret: Arc::new(admin_secret),
             now_unix_s,
             http,
+            tunnels: crate::tunnel::TunnelRegistry::new(),
         }
     }
 }
@@ -103,6 +119,11 @@ pub fn ingress_router(state: BrokerState) -> Router {
         .route("/v1/host/register", post(host_register))
         .route("/v1/heartbeat", post(host_heartbeat))
         .route("/v1/receipt", post(receipt_submit))
+        // Reverse-tunnel WebSocket: a NAT-bound host holds this open outbound so
+        // the broker can push exec jobs without dialing in. TLS-terminated by the
+        // fronting proxy in prod (item C); path-routed on the ingress listener so
+        // connection-counting is blunted (spec §Track 1).
+        .route(crate::tunnel::TUNNEL_PATH, get(crate::tunnel::tunnel_ws))
         .route("/admin/invariant", get(admin_invariant))
         .with_state(state)
 }
@@ -130,10 +151,28 @@ async fn exec(State(st): State<BrokerState>, body: Bytes) -> Response {
     }
     let spend_id = lluma_crypto::tokens::token_spend_id(&req.token);
 
-    // Resolve the client-selected host to a registered ACTIVE ingress address
-    // (before spending — do not burn a token if there is nowhere to serve it).
-    let ingress_addr = match resolve_active_host(&st.store, &req.host_account) {
-        Ok(Some(addr)) => addr,
+    // Resolve the client-selected host (must be registered + ACTIVE) BEFORE
+    // spending — do not burn a token if there is nowhere to serve it. Prefer a
+    // live reverse-tunnel socket over dialing the ingress; a tunnel socket at
+    // its in-flight cap fails as `no_host` here (never burns the token, never
+    // dials the vestigial address of a NAT host). The reserved slot is held by
+    // `Route::Tunnel`'s guard and released on every exit path below.
+    let route = match resolve_active_host(&st.store, &req.host_account) {
+        Ok(Some(addr)) => match crate::tunnel::reserve_tunnel(&st.tunnels, &req.host_account) {
+            crate::tunnel::Reservation::Reserved(guard) => Route::Tunnel(guard),
+            crate::tunnel::Reservation::AtCapacity => {
+                return err(StatusCode::BAD_GATEWAY, "no_host")
+            }
+            // No live socket: a tunnel-mode host (sentinel address) has nowhere to
+            // dial, so fail as `no_host` BEFORE spending rather than burning a
+            // token on a bogus dial (review I1). A genuine dial-in host is dialed.
+            crate::tunnel::Reservation::NoSocket => {
+                if addr == crate::tunnel::TUNNEL_SENTINEL_ADDR {
+                    return err(StatusCode::BAD_GATEWAY, "no_host");
+                }
+                Route::Http(addr)
+            }
+        },
         Ok(None) => return err(StatusCode::BAD_GATEWAY, "no_host"),
         Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
     };
@@ -175,36 +214,64 @@ async fn exec(State(st): State<BrokerState>, body: Bytes) -> Response {
         }
     }
 
-    // Forward {spend_id, sealed} to the resolved host (redirect-none client).
-    let hreq = HostExecRequest { spend_id, sealed: req.sealed };
-    let hbody = match serde_json::to_vec(&hreq) {
-        Ok(b) => b,
-        Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
-    };
-    let resp = match st
-        .http
-        .post(format!("{ingress_addr}/v1/exec"))
-        .header(header::CONTENT_TYPE, "application/json")
-        .body(hbody)
-        .send()
-        .await
-    {
-        Ok(r) => r,
-        Err(_) => return err(StatusCode::BAD_GATEWAY, "upstream"),
-    };
-    if !resp.status().is_success() {
-        return err(StatusCode::BAD_GATEWAY, "upstream");
+    // Forward {spend_id, sealed} to the resolved host. Both paths preserve the
+    // sealed envelope (aad = spend_id, HPKE to the host key) and receipts — the
+    // broker never sees plaintext, the host never sees the originator IP.
+    match route {
+        // Reverse tunnel: push the job down the host's outbound socket and await
+        // the sealed response (bounded by the tunnel request timeout). The
+        // in-flight reservation is released when `guard` drops at end of scope.
+        Route::Tunnel(guard) => {
+            match crate::tunnel::dispatch(&guard, spend_id, req.sealed).await {
+                Ok(resp) => match serde_json::to_vec(&resp) {
+                    Ok(b) => (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], b)
+                        .into_response(),
+                    Err(_) => err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+                },
+                Err(_) => err(StatusCode::BAD_GATEWAY, "upstream"),
+            }
+        }
+        // Dial-in: POST to the host's public ingress (redirect-none client).
+        Route::Http(ingress_addr) => {
+            let hreq = HostExecRequest { spend_id, sealed: req.sealed };
+            let hbody = match serde_json::to_vec(&hreq) {
+                Ok(b) => b,
+                Err(_) => return err(StatusCode::INTERNAL_SERVER_ERROR, "internal"),
+            };
+            let resp = match st
+                .http
+                .post(format!("{ingress_addr}/v1/exec"))
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(hbody)
+                .send()
+                .await
+            {
+                Ok(r) => r,
+                Err(_) => return err(StatusCode::BAD_GATEWAY, "upstream"),
+            };
+            if !resp.status().is_success() {
+                return err(StatusCode::BAD_GATEWAY, "upstream");
+            }
+            let rbytes = match resp.bytes().await {
+                Ok(b) => b.to_vec(),
+                Err(_) => return err(StatusCode::BAD_GATEWAY, "upstream"),
+            };
+            (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], rbytes).into_response()
+        }
     }
-    let rbytes = match resp.bytes().await {
-        Ok(b) => b.to_vec(),
-        Err(_) => return err(StatusCode::BAD_GATEWAY, "upstream"),
-    };
-    (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")], rbytes).into_response()
 }
 
 enum SpendOutcome {
     Spent,
     AlreadySpent,
+}
+
+/// Where a resolved exec should be forwarded.
+enum Route {
+    /// A live reverse-tunnel socket with a reserved in-flight slot.
+    Tunnel(crate::tunnel::InflightGuard),
+    /// A dial-in host at this public ingress address.
+    Http(String),
 }
 
 /// Resolve `host_account` to its registered ingress address iff it is ACTIVE.

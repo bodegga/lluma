@@ -9,7 +9,7 @@ lluma-core = { path = "../lluma-core" }
 lluma-crypto = { path = "../lluma-crypto" }
 lluma-issuer = { path = "../lluma-issuer" }
 redb = "4"
-axum = "0.7"
+axum = { version = "0.7", features = ["ws"] }
 tokio = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -19,7 +19,11 @@ blake3 = { workspace = true }
 thiserror = { workspace = true }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+futures-util = "0.3"
+rand_core = { version = "0.6", features = ["getrandom"] }
 
 [dev-dependencies]
 tokio = { workspace = true }
 blind-rsa-signatures = { workspace = true }
+lluma-host = { path = "../lluma-host" }
+tokio-tungstenite = "0.24"
