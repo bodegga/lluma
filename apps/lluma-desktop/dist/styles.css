@@ -755,3 +755,27 @@ input:focus, textarea:focus, select:focus {
   .toast { transform:translateX(-50%); }
   .modal-card { animation:none; }
 }
+
+/* ---- managed auto-host provisioning progress ---- */
+.card.provision {
+  border-left:3px solid var(--red);
+}
+.provision-head {
+  display:flex;
+  justify-content:space-between;
+  align-items:baseline;
+  gap:12px;
+  margin-bottom:10px;
+}
+.progress {
+  height:8px;
+  background:var(--field);
+  border:1px solid var(--rule);
+  overflow:hidden;
+}
+.progress-bar {
+  height:100%;
+  width:0%;
+  background:linear-gradient(90deg, var(--red), var(--orange));
+  transition:width .3s ease;
+}

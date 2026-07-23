@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Baseline permissions for the Lluma desktop webview. Grants only the event permission set, so the webview can listen for backend-emitted events (e.g. managed auto-host `host-progress`) without the wider core:default surface (menu/tray/path/image). App-defined commands are not ACL-gated and remain available.",
+  "windows": ["main"],
+  "permissions": ["core:event:default"]
+}

@@ -243,6 +243,7 @@ async function loadSettings() {
     $("host-openai-key").value = s.host?.openai_api_key || "";
     $("host-ingress").value = s.host?.ingress_addr || "";
     $("host-model-id").value = s.host?.model_id || "";
+    $("host-ollama-model").value = s.host?.ollama_model || "";
     toggleOpenAiFields();
     return s;
   } catch (e) { toast(String(e), "error"); return null; }
@@ -264,7 +265,10 @@ function currentSettingsFromForm(base) {
       epoch_salt_b64: base?.host?.epoch_salt_b64 || "",
       pow_difficulty: base?.host?.pow_difficulty || 0,
       model_id: $("host-model-id").value.trim(),
+      ollama_model: $("host-ollama-model").value.trim(),
     },
+    // Preserve one-time install consent across form saves (never reset it here).
+    ollama_install_consent: base?.ollama_install_consent || false,
   };
 }
 
@@ -356,18 +360,83 @@ async function refreshHost() {
   try { renderHost(await call("host_status")); } catch (e) { /* ignore */ }
 }
 
-$("host-start").addEventListener("click", async () => {
-  // Persist host config first so the backend serves with current form values.
+// ---- managed auto-host provisioning (Ollama install / serve / model pull) ----
+const listen = window.__TAURI__?.event?.listen;
+
+function showProvision(on) {
+  show($("provision-card"), on);
+  if (!on) {
+    $("provision-bar").style.width = "0%";
+    $("provision-pct").textContent = "";
+    $("provision-msg").textContent = "";
+  }
+}
+
+function renderProvision(p) {
+  if (!p) return;
+  showProvision(true);
+  const labels = { install: "Installing Ollama", serve: "Starting server",
+                   pull: "Downloading model", ready: "Ready", error: "Problem" };
+  $("provision-stage").textContent = (labels[p.stage] || "Setting up") + "…";
+  $("provision-msg").textContent = p.message || "";
+  if (typeof p.percent === "number") {
+    $("provision-bar").style.width = p.percent + "%";
+    $("provision-pct").textContent = p.percent + "%";
+  }
+}
+
+if (listen) {
+  listen("host-progress", (ev) => { try { renderProvision(ev.payload); } catch (_) {} });
+}
+
+// Start serving. If the backend signals it needs consent to install Ollama,
+// reveal the one-time prompt; on accept we grant consent and retry.
+async function startServing() {
+  $("host-msg").textContent = "";
+  // Disable Start while provisioning so a double-click can't kick off a second
+  // start (the backend also has a single-flight latch as the real guard).
+  $("host-start").disabled = true;
   try {
     const base = await call("get_settings");
     await call("set_settings", { settings: currentSettingsFromForm(base) });
     renderHost(await call("host_start"));
+    showProvision(false);
     toast("Host started");
+  } catch (e) {
+    const msg = String(e);
+    if (msg.includes("OLLAMA_CONSENT_NEEDED")) {
+      $("consent-model").textContent = $("host-ollama-model").value.trim() || "qwen2.5:0.5b";
+      show($("ollama-consent-modal"), true);
+      return;
+    }
+    showProvision(false);
+    $("host-msg").textContent = msg;
+    toast(msg, "error");
+  } finally {
+    $("host-start").disabled = false;
+  }
+}
+
+$("host-start").addEventListener("click", startServing);
+
+$("consent-cancel").addEventListener("click", () => show($("ollama-consent-modal"), false));
+$("consent-accept").addEventListener("click", async () => {
+  show($("ollama-consent-modal"), false);
+  try {
+    await call("grant_ollama_consent");
+    showProvision(true);
+    $("provision-stage").textContent = "Setting up…";
+    $("provision-msg").textContent = "Preparing Ollama…";
+    await startServing();
   } catch (e) { $("host-msg").textContent = String(e); toast(String(e), "error"); }
 });
 
 $("host-stop").addEventListener("click", async () => {
-  try { renderHost(await call("host_stop")); toast("Host stopped"); } catch (e) { toast(String(e), "error"); }
+  try {
+    renderHost(await call("host_stop"));
+    showProvision(false);
+    toast("Host stopped");
+  } catch (e) { toast(String(e), "error"); }
 });
 
 // ---- boot ----

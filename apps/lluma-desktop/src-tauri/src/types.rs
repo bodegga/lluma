@@ -30,6 +30,11 @@ pub struct HostConfig {
     pub pow_difficulty: u32,
     /// Model label this host advertises in the registry (non-empty required).
     pub model_id: String,
+    /// Ollama model tag the managed auto-host pulls/serves when no local
+    /// server is running (e.g. `qwen2.5:0.5b`). Empty ⇒ the built-in default.
+    /// `serde(default)` so settings files written before this field still load.
+    #[serde(default)]
+    pub ollama_model: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +44,22 @@ pub struct Settings {
     pub registry_pk_b64: String,
     pub issuer_key_id_hex: String,
     pub host: HostConfig,
+    /// Whether the user consented (once) to the app installing Ollama on their
+    /// machine as part of managed auto-host. `serde(default)` (=> false) so old
+    /// settings files still load and installation stays opt-in.
+    #[serde(default)]
+    pub ollama_install_consent: bool,
+}
+
+/// Progress event emitted to the Contribute tab during managed auto-host
+/// (Ollama install / server start / model pull). `percent` is present only for
+/// the download phase.
+#[derive(Debug, Clone, Serialize)]
+pub struct HostProgress {
+    /// "install" | "serve" | "pull" | "ready" | "error"
+    pub stage: String,
+    pub message: String,
+    pub percent: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize)]

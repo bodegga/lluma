@@ -148,9 +148,13 @@ pub fn spawn_serve(
     })
 }
 
-/// A running host: the serve task plus a shared status the UI polls.
+/// A running host: the serve task plus a shared status the UI polls. When the
+/// app itself started a local Ollama server for managed auto-host, its child is
+/// held here so "Stop serving" tears it down too (a server the user was already
+/// running is never captured, so it is never killed).
 pub struct HostHandle {
     task: tokio::task::JoinHandle<()>,
+    managed_ollama: Option<tokio::process::Child>,
     pub status: Arc<Mutex<HostStatus>>,
 }
 
@@ -162,16 +166,35 @@ impl HostHandle {
     pub async fn start(
         cfg: &HostConfig,
         host_sk: HostSecretKey,
+        managed_ollama: Option<tokio::process::Child>,
     ) -> Result<HostHandle, String> {
-        let upstream = select_upstream(cfg)?;
-        if cfg.ingress_addr.trim().is_empty() {
-            return Err("set an ingress address (e.g. http://<your-public-ip>:9000)".into());
+        // If any setup step fails after we were handed a managed Ollama child,
+        // stop it so a failed "Start serving" never strands a server process.
+        let mut managed_ollama = managed_ollama;
+        macro_rules! bail {
+            ($e:expr) => {{
+                if let Some(mut c) = managed_ollama.take() {
+                    let _ = c.kill().await;
+                }
+                return Err($e);
+            }};
         }
-        let port = port_from_ingress(&cfg.ingress_addr)?;
+        let upstream = match select_upstream(cfg) {
+            Ok(u) => u,
+            Err(e) => bail!(e),
+        };
+        if cfg.ingress_addr.trim().is_empty() {
+            bail!("set an ingress address (e.g. http://<your-public-ip>:9000)".into());
+        }
+        let port = match port_from_ingress(&cfg.ingress_addr) {
+            Ok(p) => p,
+            Err(e) => bail!(e),
+        };
         let bind: SocketAddr = ([0, 0, 0, 0], port).into();
-        let listener = tokio::net::TcpListener::bind(bind)
-            .await
-            .map_err(|e| format!("could not bind {bind}: {e}"))?;
+        let listener = match tokio::net::TcpListener::bind(bind).await {
+            Ok(l) => l,
+            Err(e) => bail!(format!("could not bind {bind}: {e}")),
+        };
         let task = spawn_serve(listener, host_sk, upstream);
 
         let reachable = reachability_check(&cfg.ingress_addr).await;
@@ -187,7 +210,7 @@ impl HostHandle {
                 "listening locally — confirm your ingress is reachable from the internet".into()
             },
         }));
-        Ok(HostHandle { task, status })
+        Ok(HostHandle { task, managed_ollama, status })
     }
 
     pub fn snapshot_status(&self) -> HostStatus {
@@ -197,8 +220,21 @@ impl HostHandle {
             .unwrap_or_default()
     }
 
-    pub fn stop(self) {
+    /// Stop serving and, if the app started a local Ollama server, stop that too.
+    pub async fn stop(self) {
         self.task.abort();
+        if let Some(mut child) = self.managed_ollama {
+            let _ = child.kill().await;
+        }
+    }
+
+    /// Synchronously signal the managed Ollama child to die, without awaiting.
+    /// For the app-exit path, where no async runtime step can be relied on
+    /// (review I-2). `start_kill` sends the OS terminate signal immediately.
+    pub fn kill_managed_now(&mut self) {
+        if let Some(child) = self.managed_ollama.as_mut() {
+            let _ = child.start_kill();
+        }
     }
 }
 

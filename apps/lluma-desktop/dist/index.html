@@ -72,8 +72,11 @@
           </header>
 
           <div class="card note">
-            <p><strong>Serving needs a reachable address.</strong> The broker forwards sealed
-            prompts to your host's ingress, so it must be reachable from the internet
+            <p><strong>Start serving just works.</strong> If you already run Ollama, LM Studio, or a
+            llama.cpp server, Lluma detects and uses it. If nothing is running, Lluma can set up
+            Ollama for you — start the server and download a small model automatically (with your
+            OK the first time).</p>
+            <p class="hint">Serving still needs a reachable address for the broker to forward work
             (public IP or port-forward). Behind home NAT this won't receive traffic yet —
             NAT-friendly hosting is on the roadmap.</p>
           </div>
@@ -96,6 +99,8 @@
                 <label class="field"><span class="field-label">API key (optional)</span>
                   <input id="host-openai-key" type="password" placeholder="sk-… (leave blank for local)" /></label>
               </div>
+              <label class="field"><span class="field-label">Auto-host model <span class="hint">— pulled if nothing is running</span></span>
+                <input id="host-ollama-model" type="text" placeholder="qwen2.5:0.5b" /></label>
             </div>
 
             <div class="card">
@@ -115,6 +120,33 @@
             <button class="btn primary" id="host-start">Start serving</button>
             <button class="btn ghost" id="host-stop">Stop</button>
             <span class="hint" id="host-msg"></span>
+          </div>
+
+          <!-- Managed auto-host progress (Ollama install / serve / model pull) -->
+          <div class="card provision hidden" id="provision-card">
+            <div class="provision-head">
+              <span class="field-label" id="provision-stage">Setting up…</span>
+              <span class="mono hint" id="provision-pct"></span>
+            </div>
+            <div class="progress"><div class="progress-bar" id="provision-bar"></div></div>
+            <p class="hint" id="provision-msg"></p>
+          </div>
+
+          <!-- One-time consent to install Ollama -->
+          <div class="modal hidden" id="ollama-consent-modal">
+            <div class="modal-card">
+              <p class="eyebrow">one-time setup</p>
+              <h2>Set up Ollama to host a model?</h2>
+              <p class="hint">No local model server is running. Lluma can install
+                <a href="https://ollama.com" target="_blank" rel="noreferrer">Ollama</a> on this
+                device, start it, and download a small model
+                (<code class="mono" id="consent-model">qwen2.5:0.5b</code>) so you can serve.
+                It runs locally; you can stop it anytime from this tab.</p>
+              <div class="row-actions">
+                <button class="btn ghost small" id="consent-cancel">Not now</button>
+                <button class="btn primary" id="consent-accept">Install &amp; start</button>
+              </div>
+            </div>
           </div>
         </section>
 

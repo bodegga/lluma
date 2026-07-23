@@ -17,6 +17,7 @@ impl Default for Settings {
             registry_pk_b64: String::new(),
             issuer_key_id_hex: String::new(),
             host: Default::default(),
+            ollama_install_consent: false,
         }
     }
 }

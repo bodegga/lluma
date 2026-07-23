@@ -5,10 +5,12 @@ mod account;
 mod anchor;
 mod client;
 mod host;
+mod ollama;
 mod settings;
 mod types;
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use base64::Engine;
 use tauri::Manager;
@@ -42,6 +44,10 @@ struct Inner {
 struct AppState {
     data_dir: PathBuf,
     inner: Mutex<Inner>,
+    /// Single-flight latch for `host_start`. Provisioning runs without the
+    /// `inner` lock (it can take minutes), so this serializes starts and closes
+    /// the double-start race where a loser could kill the winner's upstream.
+    starting: AtomicBool,
 }
 
 impl AppState {
@@ -65,6 +71,7 @@ impl AppState {
                 verified,
                 host: None,
             }),
+            starting: AtomicBool::new(false),
         }
     }
 }
@@ -298,18 +305,52 @@ async fn send_message(
 // ---- host (contribute) ----
 
 #[tauri::command]
-async fn host_start(state: tauri::State<'_, AppState>) -> Result<HostStatus, String> {
-    let mut inner = state.inner.lock().await;
-    if inner.account.is_none() {
-        return Err("unlock your account first".into());
+async fn host_start(
+    app: tauri::AppHandle,
+    state: tauri::State<'_, AppState>,
+) -> Result<HostStatus, String> {
+    // Single-flight latch (review M-6): only one host_start body runs at a time.
+    // The guard clears it on EVERY exit (early `?`, error, success), closing the
+    // double-start race even though provisioning below holds no `inner` lock.
+    if state.starting.swap(true, Ordering::SeqCst) {
+        return Err("already starting — please wait".into());
     }
-    let pass = inner.passphrase.clone().ok_or("unlock your account first")?;
-    let mut cfg = inner.settings.host.clone();
+    struct StartGuard<'a>(&'a AtomicBool);
+    impl Drop for StartGuard<'_> {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::SeqCst);
+        }
+    }
+    let _start_guard = StartGuard(&state.starting);
 
-    // Auto-host: if an OpenAI upstream is selected with no base URL, detect a
-    // running local server (Ollama / LM Studio / llama.cpp) and use it — so
-    // "Start serving" just works with zero config. Persist what we found so the
-    // UI reflects it. If nothing is found, guide the user.
+    // Phase 1 — read what we need under the lock, then release it. Provisioning
+    // (below) can take minutes (model download); holding the lock would freeze
+    // every other command. Live progress reaches the UI via `host-progress`
+    // events, not via polling this lock.
+    let (mut cfg, pass, consent) = {
+        let inner = state.inner.lock().await;
+        if inner.account.is_none() {
+            return Err("unlock your account first".into());
+        }
+        if inner.host.is_some() {
+            return Err("already serving — stop first".into());
+        }
+        let pass = inner.passphrase.clone().ok_or("unlock your account first")?;
+        (inner.settings.host.clone(), pass, inner.settings.ollama_install_consent)
+    };
+
+    // Phase 2 — auto-host (no lock held). If an OpenAI upstream is selected with
+    // no base URL, first try to reuse a server the user is already running
+    // (Ollama / LM Studio / llama.cpp). If nothing is running, provision Ollama:
+    // install (only with prior consent), `serve`, and pull a small default model.
+    // Once we hold a managed child, EVERY subsequent early return must stop it,
+    // or the server strands and later masquerades as a user-run one (review I-1).
+    let mut managed_ollama: Option<tokio::process::Child> = None;
+    async fn reap(child: &mut Option<tokio::process::Child>) {
+        if let Some(mut c) = child.take() {
+            let _ = c.kill().await;
+        }
+    }
     if matches!(cfg.upstream, types::UpstreamKind::OpenAi) && cfg.openai_base.trim().is_empty() {
         match host::detect_local_openai().await {
             Some((base, model)) => {
@@ -317,29 +358,75 @@ async fn host_start(state: tauri::State<'_, AppState>) -> Result<HostStatus, Str
                 if cfg.openai_model.trim().is_empty() {
                     cfg.openai_model = model;
                 }
-                inner.settings.host = cfg.clone();
-                let _ = inner.settings.save(&state.data_dir);
             }
             None => {
-                return Err("no local model server found — start Ollama (ollama serve) or LM Studio, or set a base URL under the upstream options".into());
+                // Managed fallback. Installing software is gated on one-time
+                // consent; the UI catches CONSENT_NEEDED and asks, then retries.
+                if !ollama::is_installed() {
+                    if !consent {
+                        return Err(ollama::CONSENT_NEEDED.into());
+                    }
+                    ollama::install(&app).await?; // no child yet — nothing to reap
+                }
+                managed_ollama = ollama::ensure_serving(&app).await?;
+                let tag = ollama::model_tag(&cfg.ollama_model);
+                if let Err(e) = ollama::ensure_model(&app, &tag).await {
+                    reap(&mut managed_ollama).await;
+                    return Err(e);
+                }
+                cfg.upstream = types::UpstreamKind::OpenAi;
+                cfg.openai_base = ollama::OLLAMA_OPENAI_BASE.to_string();
+                cfg.openai_model = tag;
             }
         }
     }
 
-    let (host_sk, _host_pk) = host::load_or_create_host_key(&state.data_dir, &pass)?;
-    let handle = HostHandle::start(&cfg, host_sk).await?;
+    let (host_sk, _host_pk) = match host::load_or_create_host_key(&state.data_dir, &pass) {
+        Ok(k) => k,
+        Err(e) => {
+            reap(&mut managed_ollama).await;
+            return Err(e);
+        }
+    };
+    // HostHandle::start takes ownership of the child and reaps it on its own
+    // internal failures, so from here the child can no longer strand.
+    let handle = HostHandle::start(&cfg, host_sk, managed_ollama).await?;
     let status = handle.snapshot_status();
+
+    // Phase 3 — re-acquire the lock to persist the resolved upstream and store
+    // the running handle. The latch already prevents a concurrent start; this
+    // guard is belt-and-suspenders.
+    let mut inner = state.inner.lock().await;
+    if inner.host.is_some() {
+        handle.stop().await; // also stops any Ollama we just started
+        return Err("already serving — stop first".into());
+    }
+    inner.settings.host = cfg;
+    let _ = inner.settings.save(&state.data_dir);
     inner.host = Some(handle);
     Ok(status)
 }
 
 #[tauri::command]
 async fn host_stop(state: tauri::State<'_, AppState>) -> Result<HostStatus, String> {
-    let mut inner = state.inner.lock().await;
-    if let Some(h) = inner.host.take() {
-        h.stop();
+    let handle = {
+        let mut inner = state.inner.lock().await;
+        inner.host.take()
+    };
+    if let Some(h) = handle {
+        h.stop().await; // stops the serve task and any managed Ollama server
     }
     Ok(host::stopped_status())
+}
+
+/// Record the user's one-time consent for the app to install Ollama. The
+/// Contribute tab calls this after the user accepts the install prompt, then
+/// retries `host_start`.
+#[tauri::command]
+async fn grant_ollama_consent(state: tauri::State<'_, AppState>) -> Result<(), String> {
+    let mut inner = state.inner.lock().await;
+    inner.settings.ollama_install_consent = true;
+    inner.settings.save(&state.data_dir)
 }
 
 #[tauri::command]
@@ -379,7 +466,22 @@ pub fn run() {
             host_start,
             host_stop,
             host_status,
+            grant_ollama_consent,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Lluma");
+        .build(tauri::generate_context!())
+        .expect("error while building Lluma")
+        .run(|app_handle, event| {
+            // Reap a managed Ollama server on app exit so quitting while hosting
+            // never strands it (review I-2). Best-effort + synchronous: the async
+            // runtime may be winding down, so use try_lock + start_kill (no await).
+            if matches!(event, tauri::RunEvent::Exit) {
+                if let Some(state) = app_handle.try_state::<AppState>() {
+                    if let Ok(mut inner) = state.inner.try_lock() {
+                        if let Some(h) = inner.host.as_mut() {
+                            h.kill_managed_now();
+                        }
+                    }
+                }
+            }
+        });
 }
