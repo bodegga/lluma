@@ -9,6 +9,7 @@
 //! and the response is E2E-sealed so no relay/gateway/broker can read it.
 
 pub mod openai;
+pub mod register;
 pub mod tunnel;
 pub use openai::OpenAiUpstream;
 

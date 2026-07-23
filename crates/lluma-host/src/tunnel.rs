@@ -104,6 +104,7 @@ pub async fn serve_once(
     })
     .await
     .map_err(|_| TunnelError::Auth)??;
+    tracing::info!("tunnel authenticated to {}", cfg.url);
 
     // Split: a single writer task owns the sink; job workers and ping-pong feed
     // it through a bounded channel so concurrent responses can't interleave on

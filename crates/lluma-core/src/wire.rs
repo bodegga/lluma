@@ -209,6 +209,19 @@ pub struct BootstrapDoc {
     pub issuer_key_id: [u8; 32],
     /// Unix seconds the doc was signed (freshness/debugging; not an expiry).
     pub issued_at_s: u64,
+    /// Reverse-tunnel endpoint (`wss://…/v1/host/tunnel`) a NAT-bound host dials,
+    /// or `None` when tunnelling is not offered. Appended LAST for ONE-WAY compat:
+    /// a client built BEFORE this field still decodes a doc signed WITH it
+    /// (postcard reads its known fields and ignores trailing bytes), and the
+    /// signature still covers the whole doc. The reverse is NOT true — postcard
+    /// is not self-describing, so a client built WITH this field cannot decode an
+    /// OLD blob that lacks it (it would read past the end). Deploy rule: publish
+    /// the re-signed blob (which carries the tag byte) BEFORE shipping any client
+    /// built from this revision. `serde(default)` is deliberately omitted: it is
+    /// inert for postcard and would only mislead. A host trusts this URL — and
+    /// verifies the broker's TLS against its hostname — only because it is
+    /// registry-signed here, so a malicious relay cannot substitute its own.
+    pub tunnel_url: Option<String>,
 }
 
 #[cfg(test)]

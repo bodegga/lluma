@@ -288,6 +288,7 @@ async fn handle_socket(mut socket: WebSocket, st: BrokerState) {
         sock.fail_all_pending();
         return;
     }
+    tracing::info!("tunnel socket registered ({} live)", st.tunnels.socket_count());
 
     let (mut ws_sink, mut ws_stream) = socket.split();
     let missed = Arc::new(AtomicU8::new(0));

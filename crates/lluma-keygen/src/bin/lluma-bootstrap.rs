@@ -10,9 +10,11 @@
 //!
 //!   lluma-bootstrap sign --registry-sk <file> --relay <url> \
 //!       --gateway-kc-b64 <b64> --issuer-key-id-hex <hex64> \
-//!       [--issued-at <unix_s>] --out <blob_file>
+//!       [--tunnel-url <wss_url>] [--issued-at <unix_s>] --out <blob_file>
 //!       → writes the signed SignedBootstrap JSON blob to <blob_file>; place it
-//!         on the relay and point LLUMA_BOOTSTRAP_FILE at it.
+//!         on the relay and point LLUMA_BOOTSTRAP_FILE at it. `--tunnel-url`, if
+//!         given, MUST be wss:// (a NAT-bound host dials it and verifies the
+//!         broker's TLS against its hostname).
 
 use base64::Engine;
 
@@ -93,8 +95,22 @@ fn run() -> Result<(), String> {
                 None => now_unix_s(),
             };
             let out = get("out")?;
+            // Optional reverse-tunnel endpoint; enforce wss:// (the client rejects
+            // anything else, so fail early here with a clear message).
+            let tunnel_url = match f.get("tunnel-url") {
+                Some(u) if u.starts_with("wss://") => Some(u.clone()),
+                Some(_) => return Err("--tunnel-url must be a wss:// URL".into()),
+                None => None,
+            };
 
-            let doc = BootstrapDoc { version: 1, relay_url, gateway_kc, issuer_key_id, issued_at_s };
+            let doc = BootstrapDoc {
+                version: 1,
+                relay_url,
+                gateway_kc,
+                issuer_key_id,
+                issued_at_s,
+                tunnel_url,
+            };
             let doc_bytes = postcard::to_stdvec(&doc).map_err(|e| format!("encode: {e}"))?;
             let sig = bootstrap_sign(&sk, &doc_bytes).map_err(|e| e.to_string())?;
 

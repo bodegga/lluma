@@ -37,6 +37,20 @@ pub fn verify_bootstrap(
     if doc.version != 1 || doc.gateway_kc.is_empty() || !doc.relay_url.starts_with("https://") {
         return Err(ClientError::Protocol);
     }
+    // A tunnel endpoint, if offered, MUST be a clean wss:// URL — plain ws is
+    // hijackable after the auth handshake (crypto-architect must-have 1). Parse
+    // strictly (scheme, host, no userinfo) to close the URL-confusion class,
+    // rather than a prefix check.
+    if let Some(url) = &doc.tunnel_url {
+        let u = reqwest::Url::parse(url).map_err(|_| ClientError::Protocol)?;
+        if u.scheme() != "wss"
+            || u.host_str().is_none_or(|h| h.is_empty())
+            || !u.username().is_empty()
+            || u.password().is_some()
+        {
+            return Err(ClientError::Protocol);
+        }
+    }
     Ok(doc)
 }
 

@@ -108,6 +108,45 @@ ssh root@159.65.35.137 'sed -i /LLUMA_GATEWAY_KC_SK_FILE/d /etc/lluma/gateway.en
   cp /etc/lluma/gateway.env.bak.<ts> /etc/lluma/gateway.env; systemctl restart lluma-gateway'
 ```
 
+## Reverse tunnel (wss) — additive to the above
+
+Lets NAT-bound hosts serve without a public IP. The signed bootstrap gains a
+`tunnel_url`; the broker exposes a ws endpoint fronted by TLS.
+
+**Deploy order matters (crypto-architect I1):** postcard is positional, so a
+client built WITH `tunnel_url` cannot decode an OLD 5-field blob. **Re-sign +
+publish the new blob (even `tunnel_url = None`) and restart the relay BEFORE
+shipping any client built from this revision.** Old deployed apps still decode
+the new blob (trailing bytes ignored), so blob-first is safe.
+
+1. **DNS:** `tunnel.n.lluma.bodegga.net` A → broker box `159.65.35.137`
+   (DigitalOcean zone `n.lluma.bodegga.net`):
+   `doctl compute domain records create n.lluma.bodegga.net --record-type A --record-name tunnel --record-data 159.65.35.137`.
+2. **TLS (Caddy on the broker box):** `ufw allow 80,443`; install Caddy; Caddyfile:
+   `tunnel.n.lluma.bodegga.net { reverse_proxy 127.0.0.1:8081 }` (Caddy passes the
+   WS upgrade through). Broker ingress already listens on `:8081`.
+   Follow-up: per-IP handshake rate limiting belongs here (the app bounds
+   concurrent pre-auth handshakes, but not per-source rate) — needs a Caddy
+   rate-limit build; tracked, not yet applied.
+3. **Re-sign the bootstrap WITH the tunnel URL** (reuse the live `$GWKC`/`$KID`):
+   ```bash
+   /opt/lluma/target/release/lluma-bootstrap sign \
+     --registry-sk /etc/lluma/keys/registry.sk \
+     --relay https://relay.n.lluma.bodegga.net \
+     --gateway-kc-b64 "$GWKC" --issuer-key-id-hex "$KID" \
+     --tunnel-url wss://tunnel.n.lluma.bodegga.net/v1/host/tunnel \
+     --out /tmp/bootstrap.bin
+   ```
+   Then deploy the blob to the relay (step 5 above) and restart the relay.
+4. **Redeploy the broker** (the ws endpoint ships in the broker binary):
+   `cargo build --release -p lluma-broker`; install; `systemctl restart lluma-broker`.
+5. **A tunnel host** runs `lluma-host` with `LLUMA_TUNNEL_URL=wss://tunnel.n…`
+   (must be wss unless `LLUMA_TUNNEL_INSECURE_WS=1` for loopback),
+   `LLUMA_BROKER_INGRESS`, `LLUMA_REGISTRY_PK_B64`, `LLUMA_EPOCH_SALT_B64`,
+   `LLUMA_POW_DIFFICULTY`. It PoW-registers (sentinel ingress `https://tunnel.invalid`),
+   heartbeats, and holds the outbound socket. Verify the broker logs
+   `tunnel socket registered`.
+
 ## Notes / follow-ups
 - No bootstrap expiry in v1: a relay can only serve an OLD *validly-signed* blob (stale
   gateway key ⇒ auto-connect simply fails; it cannot substitute a key). Add `issued_at`
