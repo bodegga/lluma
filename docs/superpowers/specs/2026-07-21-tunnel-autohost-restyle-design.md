@@ -84,11 +84,27 @@ reviews the implementation before deploy, same gate as the bootstrap feature.
 **Design.** "Start serving" brings up inference automatically:
 1. **Detect** a running local OpenAI-compatible server — Ollama (`http://localhost:11434/v1`) or
    LM Studio (`http://localhost:1234/v1`) — by probing `/v1/models`. If found, use it (zero config).
-2. **Managed fallback:** if none found, download + launch a managed llama.cpp server
-   (`llama-server`, OpenAI-compatible) + a small GGUF via `lluma-registry`'s content-addressed
-   verified download, supervise the subprocess, and wire the upstream to it. No C toolchain in the
-   app (the server is a separate prebuilt binary).
+2. **Managed fallback (REQUIRED — user directive 2026-07-21):** if no server is running, the app
+   **provisions Ollama itself** and hosts a model — no manual setup:
+   - If the `ollama` binary is missing, download + install it (Windows: the official installer /
+     winget; macOS/Linux: the official install script or a bundled binary). Ask/confirm on first
+     install, then remember.
+   - Start `ollama serve` if not already running (spawn + supervise the subprocess; stop it on
+     "Stop serving" if the app started it).
+   - `ollama pull <default small model>` (e.g. `qwen2.5:0.5b` or `llama3.2:1b`) if not present,
+     with download progress surfaced in the UI.
+   - Wire the upstream to `http://localhost:11434/v1`.
+   Ollama is chosen over a raw llama.cpp binary because it ships a cross-platform installer, a pull
+   API, subprocess-friendly `serve`, and an OpenAI-compatible endpoint — least custom infra. (A
+   bundled `llama-server` + `lluma-registry` GGUF download remains an alternative if avoiding the
+   Ollama dependency later.)
 3. Then start the host serving loop against that upstream.
+
+**Managed-Ollama components:** a `host` submodule that (a) locates/installs the `ollama` binary
+per-platform, (b) ensures `ollama serve` is up (probe → spawn), (c) triggers + monitors
+`ollama pull`, (d) tracks the managed subprocess for clean shutdown. UI: progress + a first-run
+consent prompt for the install. Detection (Track 2 step 1) is already shipped; this is the
+"nothing running" branch.
 
 The UI shows which upstream was chosen and download/launch progress. Manual base-URL entry stays
 as an override. In-process llama.cpp (`lluma-runtime`) remains the feature-gated option for
