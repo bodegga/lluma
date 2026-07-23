@@ -27,6 +27,7 @@ const HOST_REGISTER_DOMAIN: &[u8] = b"lluma-host-register-v1";
 const HEARTBEAT_DOMAIN: &[u8] = b"lluma-heartbeat-v1";
 const SNAPSHOT_DOMAIN: &[u8] = b"lluma-registry-snapshot-v1";
 const BOOTSTRAP_DOMAIN: &[u8] = b"lluma-bootstrap-v1";
+const TUNNEL_AUTH_DOMAIN: &[u8] = b"lluma-host-tunnel-v1";
 
 // Keystore blob layout:
 //   magic(4) ‖ version(1) ‖ argon2 m_cost(4 LE) ‖ t_cost(4 LE) ‖ p(4 LE)
@@ -268,6 +269,57 @@ pub fn bootstrap_verify(
     let signature = Signature::from_bytes(&sig_bytes);
     key.verify(&msg, &signature)
         .map_err(|_| CryptoError::BadSignature)
+}
+
+/// Canonical preimage a host signs to authenticate a reverse tunnel socket:
+/// `b"lluma-host-tunnel-v1" ‖ challenge[32] ‖ host_account[32] ‖ broker_key_id[32]`.
+/// All fields fixed-length; the domain is prefix-free vs the other domains, so
+/// concatenation is unambiguous. Binding `host_account` blocks confused-deputy
+/// reuse; binding `broker_key_id` blocks a phishing broker relaying a harvested
+/// signature to the real broker.
+fn tunnel_auth_canonical(
+    challenge: &[u8; 32],
+    host_account: &[u8; 32],
+    broker_key_id: &[u8; 32],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(TUNNEL_AUTH_DOMAIN.len() + 96);
+    out.extend_from_slice(TUNNEL_AUTH_DOMAIN);
+    out.extend_from_slice(challenge);
+    out.extend_from_slice(host_account);
+    out.extend_from_slice(broker_key_id);
+    out
+}
+
+/// Sign a tunnel auth challenge with the host's Ed25519 account secret key.
+pub fn tunnel_auth_sign(
+    sk: &AccountSecretKey,
+    challenge: &[u8; 32],
+    host_account: &[u8; 32],
+    broker_key_id: &[u8; 32],
+) -> Result<ReceiptSignature> {
+    let key = signing_key(sk)?;
+    let msg = tunnel_auth_canonical(challenge, host_account, broker_key_id);
+    Ok(ReceiptSignature(key.sign(&msg).to_bytes().to_vec()))
+}
+
+/// Verify a tunnel auth signature against the host's registered account pubkey.
+/// Any mismatch returns `BadSignature`.
+pub fn tunnel_auth_verify(
+    pk: &AccountPublicKey,
+    challenge: &[u8; 32],
+    host_account: &[u8; 32],
+    broker_key_id: &[u8; 32],
+    sig: &ReceiptSignature,
+) -> Result<()> {
+    let key = verifying_key(pk)?;
+    let msg = tunnel_auth_canonical(challenge, host_account, broker_key_id);
+    let sig_bytes: [u8; 64] = sig
+        .0
+        .as_slice()
+        .try_into()
+        .map_err(|_| CryptoError::BadSignature)?;
+    let signature = Signature::from_bytes(&sig_bytes);
+    key.verify(&msg, &signature).map_err(|_| CryptoError::BadSignature)
 }
 
 /// Sign raw registry-snapshot bytes with the broker's Ed25519 account secret
@@ -534,6 +586,33 @@ pub fn open_keystore(passphrase: &str, blob: &KeystoreBlob) -> Result<Mnemonic> 
 mod tests {
     use super::*;
     use lluma_core::ModelId;
+
+    #[test]
+    fn tunnel_auth_round_trip_binds_all_fields() {
+        let (sk, pk) = derive_keypair_from_seed(&Mnemonic([31u8; 16])).unwrap();
+        let chal = [1u8; 32];
+        let acct = [2u8; 32];
+        let broker = [3u8; 32];
+        let sig = tunnel_auth_sign(&sk, &chal, &acct, &broker).unwrap();
+        assert!(tunnel_auth_verify(&pk, &chal, &acct, &broker, &sig).is_ok());
+        // wrong key / challenge / account / broker id each fail
+        let (_s2, pk2) = derive_keypair_from_seed(&Mnemonic([32u8; 16])).unwrap();
+        assert!(tunnel_auth_verify(&pk2, &chal, &acct, &broker, &sig).is_err());
+        assert!(tunnel_auth_verify(&pk, &[9u8; 32], &acct, &broker, &sig).is_err());
+        assert!(tunnel_auth_verify(&pk, &chal, &[9u8; 32], &broker, &sig).is_err());
+        assert!(tunnel_auth_verify(&pk, &chal, &acct, &[9u8; 32], &sig).is_err());
+    }
+
+    #[test]
+    fn tunnel_auth_not_interchangeable_with_bootstrap() {
+        // Distinct domain ⇒ a bootstrap sig can't pass as a tunnel auth over the
+        // same-length bytes (defensive; the preimages also differ structurally).
+        let (sk, pk) = derive_keypair_from_seed(&Mnemonic([33u8; 16])).unwrap();
+        let chal = [7u8; 32];
+        let sig = tunnel_auth_sign(&sk, &chal, &[7u8; 32], &[7u8; 32]).unwrap();
+        // 96 bytes of 0x07 is NOT the tunnel preimage bytes, and bootstrap domain differs.
+        assert!(bootstrap_verify(&pk, &[7u8; 96], &sig).is_err());
+    }
 
     #[test]
     fn bootstrap_sign_verify_round_trip_and_rejects() {
