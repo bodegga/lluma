@@ -148,6 +148,23 @@ fn now_unix_s() -> u64 {
         .unwrap_or(0)
 }
 
+/// Human-readable upstream description for the status UI.
+fn upstream_desc(cfg: &HostConfig) -> String {
+    match cfg.upstream {
+        UpstreamKind::OpenAi => {
+            if cfg.openai_base.contains("11434") {
+                "Ollama (localhost:11434)".into()
+            } else if cfg.openai_base.trim().is_empty() {
+                "OpenAI-compatible".into()
+            } else {
+                cfg.openai_base.clone()
+            }
+        }
+        UpstreamKind::Echo => "Echo (diagnostics)".into(),
+        UpstreamKind::Local => "In-process llama.cpp".into(),
+    }
+}
+
 /// Load (or create on first use) the device-local HOST account Ed25519 keypair —
 /// a pseudonym DISTINCT from the user's spending account. Hosting registers +
 /// heartbeats + tunnels from the user's home IP; using a separate identity means
@@ -282,6 +299,10 @@ impl HostHandle {
             } else {
                 "listening locally — confirm your ingress is reachable from the internet".into()
             },
+            model: cfg.openai_model.clone(),
+            upstream: upstream_desc(cfg),
+            mode: "dial-in".into(),
+            endpoint: cfg.ingress_addr.clone(),
         }));
         Ok(HostHandle { tasks: vec![task], managed_ollama, status })
     }
@@ -343,6 +364,10 @@ impl HostHandle {
             credits_earned: 0,
             requests_served: 0,
             message: "serving over the reverse tunnel (no inbound port needed)".into(),
+            model: cfg.openai_model.clone(),
+            upstream: upstream_desc(cfg),
+            mode: "tunnel".into(),
+            endpoint: tunnel_url.clone(),
         }));
 
         // Heartbeat loop. The counter is wall-clock seconds so it stays strictly

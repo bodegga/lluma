@@ -30,7 +30,7 @@ function switchTab(name) {
     p.classList.toggle("active", p.id === `panel-${name}`)
   );
   if (name === "status") refreshStatus();
-  if (name === "contribute") refreshHost();
+  if (name === "contribute") { refreshHost(); if (!hwLoaded) loadHardware(); }
 }
 
 document.querySelectorAll(".nav-item").forEach((b) =>
@@ -147,6 +147,18 @@ async function refreshStatus() {
     updateConn(false, String(e));
   }
   await refreshAccount();
+  // Local serving card — show when this device is contributing.
+  try {
+    const hs = await call("host_status");
+    show($("status-serving"), !!hs.running);
+    if (hs.running) {
+      $("stat-host-mode").textContent = hs.mode || "serving";
+      $("stat-host-model").textContent = hs.model || "—";
+      $("stat-host-upstream").textContent = hs.upstream || "—";
+      $("stat-host-served").textContent = hs.requests_served;
+      $("stat-host-earned").textContent = hs.credits_earned;
+    }
+  } catch (e) { /* ignore */ }
 }
 
 $("refresh-status").addEventListener("click", refreshStatus);
@@ -350,15 +362,58 @@ $("host-upstream").addEventListener("change", toggleOpenAiFields);
 function renderHost(hs) {
   dot($("host-dot"), hs.running ? (hs.reachable ? "ok" : "warn") : "bad");
   $("host-state").textContent = hs.state;
-  $("host-reach").textContent = hs.running ? (hs.reachable ? "yes" : "no") : "—";
-  $("host-served").textContent = hs.requests_served;
-  $("host-earned").textContent = hs.credits_earned;
   $("host-msg").textContent = hs.message || "";
+  show($("host-live"), !!hs.running);
+  if (hs.running) {
+    $("host-live-mode").textContent = hs.mode || "serving";
+    $("host-live-model").textContent = hs.model || "—";
+    $("host-live-upstream").textContent = hs.upstream || "—";
+    $("host-served").textContent = hs.requests_served;
+    $("host-earned").textContent = hs.credits_earned;
+    $("host-live-endpoint").textContent = hs.endpoint || "";
+  }
 }
 
 async function refreshHost() {
   try { renderHost(await call("host_status")); } catch (e) { /* ignore */ }
 }
+
+// ---- hardware detection + model picker ----
+let hwLoaded = false;
+async function loadHardware() {
+  try {
+    const rep = await call("hardware_report");
+    const hw = rep.hardware || {};
+    $("host-hw-name").textContent = hw.vram_mb > 0 ? `${hw.gpu} · ${hw.vram_mb} MB VRAM` : (hw.gpu || "CPU");
+    const sel = $("host-model-picker");
+    sel.replaceChildren();
+    (rep.models || []).forEach((m) => {
+      const o = document.createElement("option");
+      o.value = m.tag;
+      o.textContent = `${m.fits ? "✓" : "✗"} ${m.label} (${m.params}) — ${m.tier}`;
+      o.disabled = !m.fits;
+      o.dataset.tier = m.tier;
+      sel.appendChild(o);
+    });
+    const cur = $("host-ollama-model").value.trim();
+    sel.value = cur && [...sel.options].some((o) => o.value === cur) ? cur : (rep.recommended || "");
+    applyModelPick();
+    hwLoaded = true;
+  } catch (e) { $("host-hw-name").textContent = "hardware detection unavailable"; }
+}
+
+function applyModelPick() {
+  const sel = $("host-model-picker");
+  const tag = sel.value;
+  if (!tag) return;
+  $("host-ollama-model").value = tag;      // auto-host pull target
+  $("host-openai-model").value = tag;      // model served to the network
+  if (!$("host-model-id").value.trim()) $("host-model-id").value = tag; // advertised label
+  const tier = sel.selectedOptions[0]?.dataset.tier || "";
+  $("host-model-note").textContent =
+    `Will serve ${tag}. Earns credits per served request — flat today; ${tier}-tier models will earn more once per-model crediting ships.`;
+}
+$("host-model-picker").addEventListener("change", applyModelPick);
 
 // ---- managed auto-host provisioning (Ollama install / serve / model pull) ----
 const listen = window.__TAURI__?.event?.listen;

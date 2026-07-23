@@ -88,6 +88,18 @@ pub struct HostStatus {
     pub credits_earned: u64,
     pub requests_served: u64,
     pub message: String,
+    /// The model tag currently being served (empty when stopped).
+    #[serde(default)]
+    pub model: String,
+    /// Upstream description, e.g. "Ollama (localhost:11434)".
+    #[serde(default)]
+    pub upstream: String,
+    /// "tunnel" | "dial-in" | "" (stopped).
+    #[serde(default)]
+    pub mode: String,
+    /// The serving endpoint (tunnel wss URL or dial-in ingress).
+    #[serde(default)]
+    pub endpoint: String,
 }
 
 impl Default for HostStatus {
@@ -98,6 +110,10 @@ impl Default for HostStatus {
             state: "stopped".into(),
             credits_earned: 0,
             requests_served: 0,
+            model: String::new(),
+            upstream: String::new(),
+            mode: String::new(),
+            endpoint: String::new(),
             message: String::new(),
         }
     }

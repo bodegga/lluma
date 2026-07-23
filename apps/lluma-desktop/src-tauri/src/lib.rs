@@ -4,6 +4,7 @@
 mod account;
 mod anchor;
 mod client;
+mod hardware;
 mod host;
 mod ollama;
 mod settings;
@@ -361,10 +362,17 @@ async fn host_start(
     }
     if matches!(cfg.upstream, types::UpstreamKind::OpenAi) && cfg.openai_base.trim().is_empty() {
         match host::detect_local_openai().await {
-            Some((base, model)) => {
+            Some((base, detected)) => {
+                let is_ollama = base.contains("11434");
                 cfg.openai_base = base;
-                if cfg.openai_model.trim().is_empty() {
-                    cfg.openai_model = model;
+                let picked = cfg.ollama_model.trim().to_string();
+                if is_ollama && !picked.is_empty() {
+                    // Honor the user's picked model: ensure it's pulled into the
+                    // already-running Ollama before serving it.
+                    ollama::ensure_model(&app, &picked).await?;
+                    cfg.openai_model = picked;
+                } else if cfg.openai_model.trim().is_empty() {
+                    cfg.openai_model = detected;
                 }
             }
             None => {
@@ -473,6 +481,13 @@ async fn host_stop(state: tauri::State<'_, AppState>) -> Result<HostStatus, Stri
     Ok(host::stopped_status())
 }
 
+/// Detect local hardware (GPU/VRAM) and recommend Ollama models sized to it,
+/// with a suggested default. Drives the Contribute tab's model picker.
+#[tauri::command]
+fn hardware_report() -> hardware::HardwareReport {
+    hardware::report()
+}
+
 /// Record the user's one-time consent for the app to install Ollama. The
 /// Contribute tab calls this after the user accepts the install prompt, then
 /// retries `host_start`.
@@ -521,6 +536,7 @@ pub fn run() {
             host_stop,
             host_status,
             grant_ollama_consent,
+            hardware_report,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Lluma")

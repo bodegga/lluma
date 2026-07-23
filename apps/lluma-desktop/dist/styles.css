@@ -73,7 +73,8 @@ h2 { font-size:13px; font-weight:600; letter-spacing:0.14em; text-transform:uppe
   gap:8px;
   padding:22px 20px 18px;
 }
-.brand-mark { color:var(--red); font-size:18px; line-height:1; }
+.brand-mark { color:var(--red); font-size:18px; line-height:1; display:inline-flex; align-items:center; }
+.brand-mark img { display:block; }
 .brand-word {
   font-size:16px;
   font-weight:600;

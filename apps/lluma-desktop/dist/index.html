@@ -11,7 +11,7 @@
       <!-- Left rail -->
       <aside class="rail">
         <div class="brand">
-          <span class="brand-mark" aria-hidden="true">◇</span>
+          <span class="brand-mark" aria-hidden="true"><img src="egg.svg" alt="" width="22" height="26" /></span>
           <span class="brand-word">lluma</span>
         </div>
         <nav class="nav">
@@ -81,40 +81,64 @@
             to a separate on-device host identity (kept distinct from your spending account).</p>
           </div>
 
-          <div class="grid-2">
-            <div class="card">
-              <label class="field">
-                <span class="field-label">Upstream model</span>
-                <select id="host-upstream">
-                  <option value="open_ai">OpenAI-compatible server</option>
-                  <option value="echo">Echo (diagnostics)</option>
-                  <option value="local">In-process llama.cpp (needs local-inference build)</option>
-                </select>
-              </label>
-              <div id="openai-fields">
-                <label class="field"><span class="field-label">Base URL</span>
-                  <input id="host-openai-base" type="text" placeholder="http://localhost:11434/v1" /></label>
-                <label class="field"><span class="field-label">Model</span>
-                  <input id="host-openai-model" type="text" placeholder="qwen2.5:0.5b" /></label>
-                <label class="field"><span class="field-label">API key (optional)</span>
-                  <input id="host-openai-key" type="password" placeholder="sk-… (leave blank for local)" /></label>
-              </div>
-              <label class="field"><span class="field-label">Auto-host model <span class="hint">— pulled if nothing is running</span></span>
-                <input id="host-ollama-model" type="text" placeholder="qwen2.5:0.5b" /></label>
+          <!-- Hardware-aware model picker -->
+          <div class="card">
+            <div class="card-head">
+              <h2>Your hardware &amp; model</h2>
+              <span class="chip" id="host-hw"><span class="mono" id="host-hw-name">detecting…</span></span>
             </div>
-
-            <div class="card">
-              <label class="field"><span class="field-label">Ingress address (public)</span>
-                <input id="host-ingress" type="text" placeholder="http://your-public-ip:9000" /></label>
-              <label class="field"><span class="field-label">Advertised model label</span>
-                <input id="host-model-id" type="text" placeholder="qwen2.5-0.5b" /></label>
-              <div class="host-metrics">
-                <div><span class="metric-val mono" id="host-reach">—</span><span class="metric-label">reachable</span></div>
-                <div><span class="metric-val mono" id="host-served">0</span><span class="metric-label">served</span></div>
-                <div><span class="metric-val mono" id="host-earned">0</span><span class="metric-label">credits earned</span></div>
-              </div>
-            </div>
+            <label class="field">
+              <span class="field-label">Model to serve <span class="hint">— sized to your GPU; ✓ = fits</span></span>
+              <select id="host-model-picker"></select>
+            </label>
+            <p class="hint" id="host-model-note"></p>
           </div>
+
+          <!-- Live server info (shown while serving) -->
+          <div class="card provision hidden" id="host-live">
+            <div class="card-head"><h2>Serving now</h2>
+              <span class="conn-pill"><span class="dot ok"></span><span id="host-live-mode">tunnel</span></span></div>
+            <div class="host-metrics">
+              <div><span class="metric-val mono" id="host-live-model">—</span><span class="metric-label">model</span></div>
+              <div><span class="metric-val mono" id="host-live-upstream">—</span><span class="metric-label">upstream</span></div>
+              <div><span class="metric-val mono" id="host-served">0</span><span class="metric-label">served</span></div>
+              <div><span class="metric-val mono" id="host-earned">0</span><span class="metric-label">credits earned</span></div>
+            </div>
+            <p class="hint mono" id="host-live-endpoint"></p>
+          </div>
+
+          <details class="advanced" id="host-advanced">
+            <summary>Advanced — upstream &amp; ingress</summary>
+            <div class="grid-2">
+              <div class="card">
+                <label class="field">
+                  <span class="field-label">Upstream</span>
+                  <select id="host-upstream">
+                    <option value="open_ai">OpenAI-compatible server</option>
+                    <option value="echo">Echo (diagnostics)</option>
+                    <option value="local">In-process llama.cpp (needs local-inference build)</option>
+                  </select>
+                </label>
+                <div id="openai-fields">
+                  <label class="field"><span class="field-label">Base URL</span>
+                    <input id="host-openai-base" type="text" placeholder="http://localhost:11434/v1" /></label>
+                  <label class="field"><span class="field-label">Model</span>
+                    <input id="host-openai-model" type="text" placeholder="qwen2.5:0.5b" /></label>
+                  <label class="field"><span class="field-label">API key (optional)</span>
+                    <input id="host-openai-key" type="password" placeholder="sk-… (leave blank for local)" /></label>
+                </div>
+                <label class="field"><span class="field-label">Auto-host model <span class="hint">— pulled if nothing is running</span></span>
+                  <input id="host-ollama-model" type="text" placeholder="qwen2.5:0.5b" /></label>
+              </div>
+              <div class="card">
+                <label class="field"><span class="field-label">Ingress address (public — dial-in only)</span>
+                  <input id="host-ingress" type="text" placeholder="http://your-public-ip:9000" /></label>
+                <label class="field"><span class="field-label">Advertised model label</span>
+                  <input id="host-model-id" type="text" placeholder="qwen2.5-0.5b" /></label>
+                <p class="hint">On the official app you serve over the tunnel — no ingress needed.</p>
+              </div>
+            </div>
+          </details>
 
           <div class="row-actions">
             <button class="btn primary" id="host-start">Start serving</button>
@@ -185,6 +209,18 @@
               <code class="mono account-id" id="account-id">no account yet</code>
               <button class="btn primary small hidden" id="acct-cta">Create account</button>
               <button class="btn ghost small" id="copy-id">Copy</button>
+            </div>
+          </div>
+
+          <!-- Local serving (shown when you're contributing) -->
+          <div class="card note hidden" id="status-serving">
+            <div class="card-head"><h2>Contributing compute</h2>
+              <span class="conn-pill"><span class="dot ok"></span><span id="stat-host-mode">tunnel</span></span></div>
+            <div class="host-metrics">
+              <div><span class="metric-val mono" id="stat-host-model">—</span><span class="metric-label">model</span></div>
+              <div><span class="metric-val mono" id="stat-host-upstream">—</span><span class="metric-label">upstream</span></div>
+              <div><span class="metric-val mono" id="stat-host-served">0</span><span class="metric-label">served</span></div>
+              <div><span class="metric-val mono" id="stat-host-earned">0</span><span class="metric-label">earned</span></div>
             </div>
           </div>
 
