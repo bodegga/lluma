@@ -3,7 +3,11 @@
 ## From the Full #4 broker whole-branch review (Fable, 2026-07-20) — pre-production
 
 Verdict was MERGE-AFTER-FIXES; the one fix-before-merge item (I1: trial register on
-the core router) landed. These remain, none blocking the merged milestone:
+the core router) landed — and is now IMPLEMENTED and verified live (2026-07-23):
+client `trial_register` + desktop `claim_trial` + `POST /v1/register` over the
+relay→gateway OHTTP path (PoW domain `lluma-pow-trial-v1`) returned `GRANTED` for a
+self-funded probe, which then acquired a token and ran inference. These remain, none
+blocking the merged milestone:
 
 - **I2 — `spawn_blocking` for store calls.** Broker HTTP handlers call the sync
   redb store (`with_write`/`with_read`) inline on the tokio executor. No
@@ -32,6 +36,11 @@ the core router) landed. These remain, none blocking the merged milestone:
 - **broker_e2e coverage gaps** (M8, partial): add the explicit broker-transcript
   unlinkability sweep + the plan's proptests (self-dealing zero-sum is covered by
   construction; concurrent-ledger-non-negative proptest not yet in this crate).
+- **30 s timeout ceiling (gateway upstream + broker tunnel dispatch):** both are
+  hardcoded at 30 s — fine for warm, short/medium inference but it can truncate
+  very long generations. Raise both to ~180 s (requires rebuilding + redeploying
+  `lluma-gateway` and `lluma-broker`). Related: a 14b model cold-loads in ~24 s, so
+  hosts should pre-warm their model before serving the first request.
 
 ---
 

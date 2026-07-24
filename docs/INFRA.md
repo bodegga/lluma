@@ -53,9 +53,31 @@ NAT-bound hosts serve without a public IP via an outbound wss to the broker.
   account, so the broker never learns spend_account↔IP. Blob is 371 B, verified
   via `bootstrap_smoke`. Verified live: a host using the bootstrap-published salt/
   difficulty + `https://tunnel.n` register origin authenticates + registers a socket.
+- **Chat live (LIVE 2026-07-23):** anonymous chat is verified end-to-end against
+  the deployed network — a real `qwen2.5:14b` inference served by a volunteer host
+  over the reverse-WebSocket tunnel, prompt sealed end-to-end (HPKE, `aad = spend_id`)
+  and routed relay→gateway→broker→host (~90 ms warm round-trip).
+- **Self-serve trial credits live (LIVE 2026-07-23):** a brand-new account can
+  claim a one-time proof-of-work-gated grant by `POST /v1/register` over the
+  relay→gateway OHTTP path (PoW domain `lluma-pow-trial-v1`), so the broker never
+  sees `account_pk` together with the originator IP (leak L16). No operator grant
+  needed — verified: a probe self-funded, got `GRANTED`, then acquired a token and
+  ran inference.
+- **Client host-selection fallback (LIVE 2026-07-23):** the desktop client prefers
+  snapshot hosts advertising a real model and falls through the host list instead
+  of hard-failing on the first unservicable host (e.g. a tunnel host whose socket
+  dropped). Reusing one token across attempts is safe via the broker's durable
+  spent-set (a spent-then-failed retry returns `409` and stops).
+- **Gateway allowlist confirmed (LIVE 2026-07-23):** VPS-B runs with
+  `LLUMA_GATEWAY_PREFIXES=/v1/key-config,/v1/issue,/v1/register,/v1/exec,/v1/snapshot`,
+  and the gateway loads a persistent OHTTP key from `LLUMA_GATEWAY_KC_SK_FILE`, so a
+  restart does not rotate the key / break the pinned bootstrap.
 - **Follow-ups:** per-IP handshake rate limiting at Caddy (needs a rate-limit
   build); full funded tunnel exec (needs credit grant); mnemonic-recoverable host
-  earnings + unified "one balance" GUI (ADR-0004 roadmap).
+  earnings + unified "one balance" GUI (ADR-0004 roadmap); raise the 30 s gateway
+  upstream + broker tunnel-dispatch timeouts to ~180 s for long generations
+  (gateway+broker redeploy); pre-warm the host model to avoid ~24 s cold-load on the
+  first request.
 
 ## Hosts (live)
 
