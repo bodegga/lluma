@@ -207,6 +207,129 @@ function addBubble(role, text) {
   return b;
 }
 
+// Safe inline renderer: `code`, **bold**/__bold__, *italic*/_italic_. Builds DOM
+// nodes with textContent only — never innerHTML — so model output can't inject
+// markup/script into a webview that can invoke Tauri commands.
+function inlineInto(parent, text) {
+  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(__[^_]+__)|(\*[^*\n]+\*)|(_[^_\n]+_)/;
+  let rest = text;
+  while (rest.length) {
+    const m = re.exec(rest);
+    if (!m) { parent.appendChild(document.createTextNode(rest)); break; }
+    if (m.index > 0) parent.appendChild(document.createTextNode(rest.slice(0, m.index)));
+    const tok = m[0];
+    let el;
+    if (tok[0] === "`") { el = document.createElement("code"); el.textContent = tok.slice(1, -1); }
+    else if (tok.startsWith("**") || tok.startsWith("__")) { el = document.createElement("strong"); el.textContent = tok.slice(2, -2); }
+    else { el = document.createElement("em"); el.textContent = tok.slice(1, -1); }
+    parent.appendChild(el);
+    rest = rest.slice(m.index + tok.length);
+  }
+}
+
+// Minimal, dependency-free Markdown block renderer covering what the models emit:
+// fenced code, headings, ordered/unordered lists, blockquotes, paragraphs.
+function renderMarkdown(container, src) {
+  const lines = String(src).replace(/\r\n/g, "\n").split("\n");
+  const isBlank = (l) => /^\s*$/.test(l);
+  const isUl = (l) => /^\s*[-*+]\s+/.test(l);
+  const isOl = (l) => /^\s*\d+[.)]\s+/.test(l);
+  const isH = (l) => /^\s{0,3}#{1,6}\s+/.test(l);
+  const isFence = (l) => /^\s*```/.test(l);
+  const isQuote = (l) => /^\s*>\s?/.test(l);
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    if (isFence(line)) {
+      i++; const buf = [];
+      while (i < lines.length && !isFence(lines[i])) { buf.push(lines[i]); i++; }
+      if (i < lines.length) i++; // closing fence
+      const pre = document.createElement("pre"); const code = document.createElement("code");
+      code.textContent = buf.join("\n"); pre.appendChild(code); container.appendChild(pre); continue;
+    }
+    if (isBlank(line)) { i++; continue; }
+    if (isH(line)) {
+      const m = /^\s{0,3}(#{1,6})\s+(.*)$/.exec(line);
+      const el = document.createElement("h" + Math.min(m[1].length + 2, 6));
+      inlineInto(el, m[2].trim()); container.appendChild(el); i++; continue;
+    }
+    if (isUl(line) || isOl(line)) {
+      // Group a whole list into ONE <ul>/<ol> — including "loose" lists where the
+      // model puts a blank line between items — so the browser auto-numbers 1,2,3
+      // even when the source repeats "1." for every item. A blank line only stays
+      // in the list if the next non-blank line continues the same list kind.
+      const ordered = isOl(line);
+      const list = document.createElement(ordered ? "ol" : "ul");
+      const matches = (l) => (ordered ? isOl(l) : isUl(l));
+      const strip = (l) => l.replace(ordered ? /^\s*\d+[.)]\s+/ : /^\s*[-*+]\s+/, "");
+      while (i < lines.length) {
+        if (matches(lines[i])) {
+          const li = document.createElement("li");
+          inlineInto(li, strip(lines[i])); list.appendChild(li); i++;
+        } else if (isBlank(lines[i]) && i + 1 < lines.length && matches(lines[i + 1])) {
+          i++; // swallow a single blank separating loose list items
+        } else {
+          break;
+        }
+      }
+      container.appendChild(list); continue;
+    }
+    if (isQuote(line)) {
+      const bq = document.createElement("blockquote"); const buf = [];
+      while (i < lines.length && isQuote(lines[i])) { buf.push(lines[i].replace(/^\s*>\s?/, "")); i++; }
+      inlineInto(bq, buf.join(" ")); container.appendChild(bq); continue;
+    }
+    const buf = [];
+    while (i < lines.length && !isBlank(lines[i]) && !isFence(lines[i]) && !isH(lines[i])
+           && !isUl(lines[i]) && !isOl(lines[i]) && !isQuote(lines[i])) {
+      buf.push(lines[i]); i++;
+    }
+    const p = document.createElement("p");
+    inlineInto(p, buf.join(" ")); container.appendChild(p);
+  }
+}
+
+// In-memory transcript of the CURRENT chat. The protocol carries one opaque
+// prompt per request and the host has no session state (each spend is anonymous
+// and may land on a different host), so multi-turn context is assembled here and
+// sent inline. Cleared by "New chat".
+let convo = []; // [{ role: "user" | "assistant", text }]
+const CONTEXT_CHAR_BUDGET = 12000; // keep well inside the model's window
+
+function buildPrompt(current) {
+  if (convo.length === 0) return current;
+  let hist = "";
+  for (const m of convo) {
+    hist += (m.role === "user" ? "User: " : "Assistant: ") + m.text + "\n\n";
+  }
+  let trimmed = false;
+  if (hist.length > CONTEXT_CHAR_BUDGET) {
+    hist = hist.slice(hist.length - CONTEXT_CHAR_BUDGET);
+    trimmed = true;
+  }
+  return `You are continuing an ongoing conversation.${trimmed ? " (Earlier turns are truncated.)" : ""} Conversation so far:\n\n${hist}Reply to the user's latest message below. Do not prefix your reply.\n\nUser: ${current}`;
+}
+
+function newChat() {
+  convo = [];
+  const t = $("thread");
+  t.replaceChildren();
+  const wrap = document.createElement("div");
+  wrap.className = "thread-empty";
+  wrap.id = "thread-empty";
+  const glyph = document.createElement("p");
+  glyph.className = "empty-glyph"; glyph.setAttribute("aria-hidden", "true"); glyph.textContent = "▸";
+  const title = document.createElement("p");
+  title.className = "empty-title"; title.textContent = "Ask anything, anonymously.";
+  const sub = document.createElement("p");
+  sub.className = "empty-sub";
+  sub.textContent = "Your prompt is sealed end-to-end and routed so no single hop ever sees both who you are and what you asked.";
+  wrap.append(glyph, title, sub);
+  t.appendChild(wrap);
+}
+
+$("new-chat-btn")?.addEventListener("click", newChat);
+
 const composer = $("composer");
 const prompt = $("prompt");
 prompt.addEventListener("input", () => {
@@ -225,10 +348,16 @@ composer.addEventListener("submit", async (e) => {
   prompt.value = ""; prompt.style.height = "auto";
   const pending = addBubble("host pending", "…");
   $("send-btn").disabled = true;
+  // Assemble multi-turn context BEFORE recording this turn (so it isn't included twice).
+  const promptToSend = buildPrompt(text);
   try {
-    const reply = await call("send_message", { prompt: text });
+    const reply = await call("send_message", { prompt: promptToSend });
     pending.classList.remove("pending");
-    pending.textContent = reply.answer;
+    pending.replaceChildren();
+    renderMarkdown(pending, reply.answer);
+    // Record the exchange only on success, so a failed turn doesn't poison context.
+    convo.push({ role: "user", text });
+    convo.push({ role: "assistant", text: reply.answer });
     acct.balance = reply.balance;
     renderAccount();
   } catch (err) {
@@ -351,6 +480,21 @@ $("acquire-btn").addEventListener("click", async () => {
     $("acct-msg").textContent = `Balance: ${bal} credits.`;
     toast(`Acquired — ${bal} credits`);
   } catch (e) { $("acct-msg").textContent = String(e); }
+});
+
+$("trial-btn").addEventListener("click", async () => {
+  const btn = $("trial-btn");
+  btn.disabled = true;
+  $("trial-msg").textContent = "Claiming starter credits… (solving proof-of-work)";
+  try {
+    const msg = await call("claim_trial");
+    $("trial-msg").textContent = msg;
+    toast("Starter credits granted");
+  } catch (e) {
+    $("trial-msg").textContent = String(e);
+  } finally {
+    btn.disabled = false;
+  }
 });
 
 // ---- host / contribute ----

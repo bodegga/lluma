@@ -35,7 +35,10 @@
               <p class="eyebrow">anonymous inference</p>
               <h1>Chat</h1>
             </div>
-            <div class="head-meta mono" id="chat-balance">— credits</div>
+            <div class="head-actions">
+              <button class="btn ghost small" id="new-chat-btn" title="Start a new conversation (clears context)">New chat</button>
+              <span class="head-meta mono" id="chat-balance">— credits</span>
+            </div>
           </header>
 
           <div class="thread" id="thread" aria-live="polite">
@@ -307,6 +310,14 @@
                 <code class="mono account-id" id="set-account-id"></code>
                 <button class="btn ghost small" id="acct-lock">Lock</button>
               </div>
+              <div class="trial">
+                <div>
+                  <span class="field-label">Starter credits</span>
+                  <span class="hint">New here? Claim a one-time batch of free trial credits — no operator needed. Then acquire tokens below to spend them.</span>
+                </div>
+                <button class="btn primary" id="trial-btn">Get starter credits</button>
+              </div>
+              <span class="hint" id="trial-msg"></span>
               <div class="acquire">
                 <label class="field"><span class="field-label">Acquire tokens</span>
                   <input id="acquire-n" type="number" min="1" value="10" /></label>

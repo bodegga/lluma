@@ -12,11 +12,11 @@ use blind_rsa_signatures::reexports::rand::Rng;
 
 use lluma_core::proto::v1::{
     ExecRequest, ExecResponse, IssueRequest, IssueResponse, KeyConfigResponse, SignedBootstrap,
-    SnapshotResponse,
+    SnapshotResponse, TrialRegisterRequest,
 };
 use lluma_core::wire::{
     AccountPublicKey, AccountSecretKey, BootstrapDoc, HostPublicKey, IssueRequestBody,
-    OhttpKeyConfig, ReceiptSignature, SnapshotBody, SnapshotHostEntry, Token,
+    OhttpKeyConfig, ReceiptSignature, SnapshotBody, SnapshotHostEntry, Token, TrialRegisterBody,
 };
 use lluma_net::{InnerRequest, OhttpAgent};
 
@@ -51,9 +51,10 @@ pub fn verify_bootstrap(
             return Err(ClientError::Protocol);
         }
     }
-    // Sanity-bound the published host-registration difficulty so a mis-signed
-    // absurd value can't make a would-be host grind PoW forever (a real policy
-    // is ~20 bits; the broker rejects a too-low PoW regardless).
+    // Sanity-bound the published PoW difficulty (used for BOTH host registration
+    // and self-serve trial claims) so a mis-signed absurd value can't make a
+    // would-be host or trial-claimer grind PoW forever (a real policy is ~20
+    // bits; the broker rejects a too-low PoW regardless).
     if let Some(d) = doc.pow_difficulty {
         if d > 30 {
             return Err(ClientError::Protocol);
@@ -116,6 +117,12 @@ pub fn verify_snapshot(
 pub enum ClientError {
     #[error("transport")]
     Transport,
+    /// The relay/gateway hop returned a non-2xx OUTER status (e.g. the gateway's
+    /// uniform 502 for a disallowed path or an upstream failure). Distinct from
+    /// [`Server`] (an inner origin status), so a misconfigured allowlist or a
+    /// dead upstream is diagnosable rather than a bare "transport".
+    #[error("relay/gateway status {0}")]
+    Relay(u16),
     #[error("protocol")]
     Protocol,
     #[error("crypto")]
@@ -127,8 +134,13 @@ pub enum ClientError {
 }
 
 impl From<lluma_net::NetError> for ClientError {
-    fn from(_: lluma_net::NetError) -> Self {
-        ClientError::Transport
+    fn from(e: lluma_net::NetError) -> Self {
+        match e {
+            // Preserve the outer status so a gateway 502 (disallowed path /
+            // dead upstream) is distinguishable from a genuine connect failure.
+            lluma_net::NetError::Relay(s) => ClientError::Relay(s),
+            _ => ClientError::Transport,
+        }
     }
 }
 impl From<lluma_crypto::CryptoError> for ClientError {
@@ -269,6 +281,67 @@ impl Client {
             tokens.push(lluma_crypto::tokens::token_unblind(&kc.issuer_public_key, st, sig)?);
         }
         Ok(tokens)
+    }
+
+    /// Self-serve one-time trial credits (anti-Sybil `/v1/register`).
+    ///
+    /// Solves the trial proof-of-work — BLAKE3 over
+    /// `POW_TRIAL_DOMAIN ‖ account_pk ‖ nonce ‖ epoch_salt` with
+    /// `pow_difficulty` leading zero bits — and POSTs the request over the SAME
+    /// relay→gateway OHTTP path as every other call. Riding the relay is the
+    /// privacy contract for this endpoint (leak L16): the broker verifies the
+    /// PoW and credits the ledger, but never sees this account's IP alongside
+    /// its `account_pk` at the account's most identifiable moment.
+    ///
+    /// `epoch_salt` and `pow_difficulty` come from the registry-signed bootstrap
+    /// (never from unverified relay data). Returns `Ok(true)` when the grant
+    /// lands, `Ok(false)` on the broker's deliberately UNIFORM refusal (already
+    /// claimed / daily budget exhausted / stale PoW — indistinguishable by
+    /// design so no per-account budget signal leaks).
+    pub async fn trial_register(
+        &self,
+        epoch_salt: &[u8; 32],
+        pow_difficulty: u32,
+    ) -> Result<bool, ClientError> {
+        // Bound the difficulty the same way `verify_bootstrap` does: `pow_solve`
+        // is a synchronous scan, so an absurd difficulty would spin effectively
+        // forever. The bootstrap already rejects >30, but guard here too since
+        // this is a public library entry point (defense in depth).
+        if pow_difficulty > 30 {
+            return Err(ClientError::Protocol);
+        }
+        let account: [u8; 32] =
+            self.pk.0.as_slice().try_into().map_err(|_| ClientError::Crypto)?;
+        // CPU-bound solve (inline, like the blind-RSA work in `acquire`). At the
+        // bootstrap-published difficulty this is sub-second; the broker only ever
+        // verifies, never solves.
+        let nonce = lluma_crypto::account::pow_solve(
+            lluma_crypto::account::POW_TRIAL_DOMAIN,
+            &account,
+            epoch_salt,
+            pow_difficulty,
+        );
+        let req = TrialRegisterRequest {
+            body: TrialRegisterBody { version: 1, account },
+            pow_nonce: nonce.to_vec(),
+        };
+        let json = serde_json::to_vec(&req).map_err(|_| ClientError::Protocol)?;
+        let resp = self
+            .agent
+            .round_trip(InnerRequest {
+                method: "POST".into(),
+                path: "/v1/register".into(),
+                content_type: Some("application/json".into()),
+                body: json,
+            })
+            .await?;
+        match resp.status {
+            200 => Ok(true),
+            // Uniform refusal (broker maps AlreadyGranted/BudgetExhausted/BadPow
+            // /BadRequest all to 429 so budget state leaks nothing).
+            429 => Ok(false),
+            s => Err(ClientError::Server(s)),
+        }
     }
 
     /// Fetch + verify the signed host snapshot over the relay, returning the

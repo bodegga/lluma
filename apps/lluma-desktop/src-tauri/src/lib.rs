@@ -277,6 +277,30 @@ async fn network_status(state: tauri::State<'_, AppState>) -> Result<NetworkStat
     Ok(client::network_status(&cli).await)
 }
 
+/// Self-serve starter credits: solve the bootstrap-published trial PoW and
+/// register over the relay→gateway path (the broker never sees this account's
+/// IP + account_pk together, leak L16). Requires an unlocked account (the trial
+/// credits its ledger) and a connected session (bootstrap params).
+#[tauri::command]
+async fn claim_trial(state: tauri::State<'_, AppState>) -> Result<String, String> {
+    let (relay, sk, pk, v) = {
+        let inner = state.inner.lock().await;
+        let acct = inner.account.as_ref().ok_or("unlock your account first")?;
+        let v = inner
+            .verified
+            .as_ref()
+            .ok_or("not connected — connect to the network first")?;
+        (
+            inner.settings.relay_url.clone(),
+            acct.sk.clone(),
+            acct.pk.clone(),
+            v.clone(),
+        )
+    };
+    let cli = client::build_client(&relay, &sk, &pk, &v);
+    client::claim_trial(&cli, &v).await
+}
+
 #[tauri::command]
 async fn acquire_tokens(
     state: tauri::State<'_, AppState>,
@@ -530,6 +554,7 @@ pub fn run() {
             unlock,
             lock,
             network_status,
+            claim_trial,
             acquire_tokens,
             send_message,
             host_start,

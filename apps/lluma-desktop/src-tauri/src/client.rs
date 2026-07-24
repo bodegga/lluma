@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use base64::Engine;
-use lluma_client::Client;
+use lluma_client::{Client, ClientError};
 use lluma_core::wire::{
     AccountPublicKey, AccountSecretKey, HostPublicKey, KeystoreBlob, OhttpKeyConfig, Token,
 };
@@ -159,6 +159,28 @@ pub async fn acquire(
     Ok(store.balance())
 }
 
+/// Self-serve trial credits: solve the trial PoW (bound to this account + the
+/// bootstrap-published `epoch_salt`) and register over the relay→gateway path.
+/// Returns a user-facing status message. `epoch_salt`/`pow_difficulty` come from
+/// the signed bootstrap — self-host/dev builds (which carry neither) can't claim.
+pub async fn claim_trial(client: &Client, v: &VerifiedNet) -> Result<String, String> {
+    let (Some(salt), Some(difficulty)) = (v.epoch_salt, v.pow_difficulty) else {
+        return Err(
+            "self-serve credits aren't offered on this network — ask your operator for a grant"
+                .into(),
+        );
+    };
+    match client.trial_register(&salt, difficulty).await {
+        Ok(true) => Ok("Starter credits granted — acquire tokens to start chatting.".into()),
+        // Uniform refusal: already claimed, or the daily trial budget is spent.
+        Ok(false) => Err(
+            "starter credits are unavailable right now — you may have already claimed them, or the daily pool is spent. Try again tomorrow."
+                .into(),
+        ),
+        Err(e) => Err(format!("could not claim starter credits ({e}) — check your connection")),
+    }
+}
+
 /// Send one chat message: discover a host from the signed snapshot, spend one
 /// token, and return the sealed answer. Persists the reduced token store.
 pub async fn send_message(
@@ -172,28 +194,66 @@ pub async fn send_message(
     if store.tokens.is_empty() {
         return Err("no credits — fund your account (copy your account id from Status)".into());
     }
-    let kc = client.key_config().await.map_err(|e| e.to_string())?;
-    let hosts = client.snapshot(registry_pk).await.map_err(|e| e.to_string())?;
-    let host = hosts
-        .first()
-        .ok_or_else(|| "no active hosts in the network right now".to_string())?;
-    let token = store
-        .tokens
-        .pop()
-        .ok_or_else(|| "no credits".to_string())?;
-    let result = client
-        .exec_with_host(&kc, token, host, prompt.as_bytes())
-        .await;
-    // On success the token is spent; persist the reduced store. On failure the
-    // token was already popped — persist anyway (a spent-or-lost token must not
-    // be replayed), and surface the error.
+    // Stage-labelled errors: a bare "transport" can't tell a gateway allowlist
+    // gap from a dead host directory from a failed exec. Name the stage that
+    // failed (and preserve the underlying status, e.g. "relay/gateway status 502").
+    let kc = client
+        .key_config()
+        .await
+        .map_err(|e| format!("connect check failed ({e})"))?;
+    let mut hosts = client
+        .snapshot(registry_pk)
+        .await
+        .map_err(|e| format!("host discovery failed ({e}) — the network's host directory is unreachable"))?;
+    if hosts.is_empty() {
+        return Err("no active hosts in the network right now".into());
+    }
+    // Prefer hosts advertising a real model (genuine inference) over model-less
+    // demo/echo hosts — `sort_by_key` puts `models.is_empty() == false` first and
+    // is stable, so snapshot order is otherwise preserved.
+    hosts.sort_by_key(|h| h.models.is_empty());
+
+    // Try each host in turn instead of hard-failing on the first. A snapshot host
+    // can be ACTIVE in the directory yet momentarily unservable (e.g. a tunnel
+    // host whose socket dropped) — the broker answers `no_host` for that BEFORE
+    // spending, so the same token is still valid for the next host. Reusing one
+    // token across attempts is safe: the broker's durable spent-set means that if
+    // an attempt DID spend then failed to deliver, the next attempt returns 409
+    // (double-spend), which we treat as terminal rather than retrying.
+    let token = store.tokens.last().cloned().ok_or("no credits")?;
+    let n = hosts.len();
+    let mut last_err = String::new();
+    for (i, host) in hosts.iter().enumerate() {
+        match client.exec_with_host(&kc, token.clone(), host, prompt.as_bytes()).await {
+            Ok(answer) => {
+                store.tokens.pop(); // consumed by a successful spend
+                store.save(dir, passphrase)?;
+                return Ok(ChatReply {
+                    answer: String::from_utf8_lossy(&answer).to_string(),
+                    spent: 1,
+                    balance: store.balance(),
+                });
+            }
+            // The token was spent, then the host failed to deliver — it cannot be
+            // reused, and no other host will accept it. Consume it and stop.
+            Err(ClientError::Server(409)) => {
+                store.tokens.pop();
+                store.save(dir, passphrase)?;
+                return Err(
+                    "the credit was spent but the host didn't return a result — please try again"
+                        .into(),
+                );
+            }
+            // Unservable host (no_host / upstream / gateway timeout): the token was
+            // not confirmed spent, so fall through to the next candidate.
+            Err(e) => {
+                last_err = format!("host {}/{n}: {e}", i + 1);
+            }
+        }
+    }
+    // Every host declined before confirming a spend — keep the (untouched) token.
     store.save(dir, passphrase)?;
-    let answer = result.map_err(|e| e.to_string())?;
-    Ok(ChatReply {
-        answer: String::from_utf8_lossy(&answer).to_string(),
-        spent: 1,
-        balance: store.balance(),
-    })
+    Err(format!("no host could serve this request right now ({last_err})"))
 }
 
 #[cfg(test)]
